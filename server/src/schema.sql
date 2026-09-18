@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   -- timezone-conversion mismatch between what the UI displays and stores.
   "timestamp"   TEXT NOT NULL,
   action        TEXT NOT NULL
-                  CHECK (action IN ('TRANSFER', 'STOCK_UPDATE', 'ADD_SPARE_PART', 'DELETE_SPARE_PART')),
+                  CHECK (action IN ('TRANSFER', 'STOCK_UPDATE', 'ADD_SPARE_PART', 'DELETE_SPARE_PART',
+                                     'ADD_FIXED_ASSET', 'WORK_ORDER')),
   description   TEXT NOT NULL,
   performed_by  TEXT NOT NULL,
   site_from     TEXT,
@@ -83,3 +84,55 @@ CREATE TABLE IF NOT EXISTS gallery (
 );
 
 CREATE INDEX IF NOT EXISTS idx_gallery_site ON gallery(site);
+
+-- ── Fixed Assets (Asset Registry) ─────────────────────────────────────────
+-- Distinct from spare_parts: these are capital/fixed assets (machinery,
+-- inverters, vehicles, panels) tracked individually with acquisition cost
+-- and depreciation, rather than consumable stock counted by quantity.
+CREATE TABLE IF NOT EXISTS fixed_assets (
+  id                   TEXT PRIMARY KEY,
+  asset_code           TEXT NOT NULL UNIQUE,
+  name                 TEXT NOT NULL,
+  category             TEXT NOT NULL,
+  site                 TEXT NOT NULL REFERENCES sites(key) ON DELETE RESTRICT,
+  acquisition_date     DATE NOT NULL DEFAULT CURRENT_DATE,
+  acquisition_cost     NUMERIC NOT NULL DEFAULT 0,
+  useful_life_years    INTEGER NOT NULL DEFAULT 5,
+  salvage_value        NUMERIC NOT NULL DEFAULT 0,
+  depreciation_method  TEXT NOT NULL DEFAULT 'straight-line'
+                         CHECK (depreciation_method IN ('straight-line')),
+  status               TEXT NOT NULL DEFAULT 'Active'
+                         CHECK (status IN ('Active', 'Under Maintenance', 'Retired', 'Disposed')),
+  serial_number        TEXT,
+  warranty_expiry      DATE,
+  notes                TEXT NOT NULL DEFAULT '',
+  image_url            TEXT,
+  created_at           DATE NOT NULL DEFAULT CURRENT_DATE
+);
+
+CREATE INDEX IF NOT EXISTS idx_fixed_assets_site ON fixed_assets(site);
+CREATE INDEX IF NOT EXISTS idx_fixed_assets_category ON fixed_assets(category);
+
+-- ── Work Orders (Scheduled / Preventive Maintenance) ──────────────────────
+-- Distinct from spare_parts.status = 'Maintenance Needed' (a stock-level
+-- flag): work orders are dated, assignable tasks against a specific fixed
+-- asset, closer to how an EAM (SAP EAM / IBM Maximo) schedules PM work.
+CREATE TABLE IF NOT EXISTS work_orders (
+  id              TEXT PRIMARY KEY,
+  asset_id        TEXT NOT NULL REFERENCES fixed_assets(id) ON DELETE CASCADE,
+  title           TEXT NOT NULL,
+  type            TEXT NOT NULL DEFAULT 'Preventive'
+                    CHECK (type IN ('Preventive', 'Corrective', 'Inspection')),
+  priority        TEXT NOT NULL DEFAULT 'Medium'
+                    CHECK (priority IN ('Low', 'Medium', 'High', 'Urgent')),
+  status          TEXT NOT NULL DEFAULT 'Scheduled'
+                    CHECK (status IN ('Scheduled', 'In Progress', 'Completed', 'Cancelled')),
+  due_date        DATE NOT NULL,
+  completed_date  DATE,
+  assigned_to     TEXT,
+  notes           TEXT NOT NULL DEFAULT '',
+  created_at      DATE NOT NULL DEFAULT CURRENT_DATE
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_orders_asset ON work_orders(asset_id);
+CREATE INDEX IF NOT EXISTS idx_work_orders_due ON work_orders(due_date);

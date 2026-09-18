@@ -66,11 +66,11 @@ import { TransferModal } from './TransferModal';
 import type { AdminView } from './Sidebar';
 export { SITE_LABEL };
 
-function formatIDR(val: number): string {
+export function formatIDR(val: number): string {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(val);
 }
 
-function PageHeader({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub: string }) {
+export function PageHeader({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub: string }) {
   return (
     <div className="view-page-header">
       <div className="view-page-title">
@@ -426,7 +426,7 @@ export const CategoriesView: React.FC<{ spareParts: SparePart[] }> = ({ sparePar
 };
 
 /* ────────────────────────────── Assignments (Transfers) ────────────────────────────── */
-const emptyInputStyle: React.CSSProperties = {
+export const emptyInputStyle: React.CSSProperties = {
   background: 'var(--bg-root)',
   border: '1px solid var(--border-subtle)',
   borderRadius: '10px',
@@ -1182,6 +1182,8 @@ export const ACTION_META: Record<ActivityLog['action'], { label: string; color: 
   STOCK_UPDATE: { label: 'Update Stok', color: '#60A5FA', bg: 'rgba(96, 165, 250, 0.12)', icon: RefreshCw },
   ADD_SPARE_PART: { label: 'Item Baru', color: '#34D399', bg: 'rgba(52, 211, 153, 0.12)', icon: PlusCircle },
   DELETE_SPARE_PART: { label: 'Item Dihapus', color: '#F87171', bg: 'rgba(248, 113, 113, 0.12)', icon: Trash2 },
+  ADD_FIXED_ASSET: { label: 'Aset Tetap Baru', color: '#A78BFA', bg: 'rgba(167, 139, 250, 0.12)', icon: Building2 },
+  WORK_ORDER: { label: 'Work Order', color: '#FBBF24', bg: 'rgba(251, 191, 36, 0.12)', icon: Wrench },
 };
 
 /** Parses the app's canonical "YYYY-MM-DD HH:mm" log timestamp. Falls back

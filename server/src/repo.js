@@ -68,6 +68,79 @@ function toDateStr(value) {
   return value.toISOString().split('T')[0];
 }
 
+/** Straight-line depreciation, computed on read so it's always current —
+ * no cron job needed to "age" stored book values day by day. */
+function computeDepreciation({ acquisitionDate, acquisitionCost, usefulLifeYears, salvageValue }) {
+  const cost = Number(acquisitionCost) || 0;
+  const salvage = Number(salvageValue) || 0;
+  const lifeYears = Math.max(Number(usefulLifeYears) || 0, 1);
+  const depreciableBase = Math.max(cost - salvage, 0);
+  const annualDepreciation = depreciableBase / lifeYears;
+
+  const acquired = new Date(acquisitionDate);
+  const now = new Date();
+  const msElapsed = Math.max(now.getTime() - acquired.getTime(), 0);
+  const yearsElapsed = msElapsed / (365.25 * 24 * 60 * 60 * 1000);
+
+  const accumulatedDepreciation = Math.min(annualDepreciation * yearsElapsed, depreciableBase);
+  const bookValue = Math.max(cost - accumulatedDepreciation, salvage);
+  const depreciationPct = depreciableBase > 0 ? Math.min((accumulatedDepreciation / depreciableBase) * 100, 100) : 0;
+  const fullyDepreciated = accumulatedDepreciation >= depreciableBase - 0.01;
+
+  return {
+    annualDepreciation: Math.round(annualDepreciation),
+    accumulatedDepreciation: Math.round(accumulatedDepreciation),
+    bookValue: Math.round(bookValue),
+    depreciationPct: Math.round(depreciationPct * 10) / 10,
+    fullyDepreciated,
+  };
+}
+
+const mapFixedAsset = (r) => {
+  const dep = computeDepreciation({
+    acquisitionDate: r.acquisition_date,
+    acquisitionCost: r.acquisition_cost,
+    usefulLifeYears: r.useful_life_years,
+    salvageValue: r.salvage_value,
+  });
+  return {
+    id: r.id,
+    assetCode: r.asset_code,
+    name: r.name,
+    category: r.category,
+    site: r.site,
+    acquisitionDate: toDateStr(r.acquisition_date),
+    acquisitionCost: Number(r.acquisition_cost),
+    usefulLifeYears: r.useful_life_years,
+    salvageValue: Number(r.salvage_value),
+    depreciationMethod: r.depreciation_method,
+    status: r.status,
+    serialNumber: r.serial_number ?? undefined,
+    warrantyExpiry: r.warranty_expiry ? toDateStr(r.warranty_expiry) : undefined,
+    notes: r.notes,
+    imageUrl: r.image_url ?? undefined,
+    createdAt: toDateStr(r.created_at),
+    ...dep,
+  };
+};
+
+const mapWorkOrder = (r) => ({
+  id: r.id,
+  assetId: r.asset_id,
+  title: r.title,
+  type: r.type,
+  priority: r.priority,
+  status:
+    r.status === 'Scheduled' && r.due_date && new Date(r.due_date) < new Date(new Date().toDateString())
+      ? 'Overdue'
+      : r.status,
+  dueDate: toDateStr(r.due_date),
+  completedDate: r.completed_date ? toDateStr(r.completed_date) : undefined,
+  assignedTo: r.assigned_to ?? undefined,
+  notes: r.notes,
+  createdAt: toDateStr(r.created_at),
+});
+
 // ── Users ────────────────────────────────────────────────────────────────
 export const Users = {
   async all() {
@@ -314,6 +387,106 @@ export const Gallery = {
   },
   async remove(id) {
     const { rowCount } = await query('DELETE FROM gallery WHERE id = $1', [id]);
+    return rowCount > 0;
+  },
+};
+
+// ── Fixed Assets (Asset Registry / Depreciation) ────────────────────────
+export const FixedAssets = {
+  async all() {
+    const { rows } = await query('SELECT * FROM fixed_assets ORDER BY created_at DESC, id DESC');
+    return rows.map(mapFixedAsset);
+  },
+  async find(id) {
+    const { rows } = await query('SELECT * FROM fixed_assets WHERE id = $1', [id]);
+    return rows[0] ? mapFixedAsset(rows[0]) : null;
+  },
+  async insert(a) {
+    const { rows } = await query(
+      `INSERT INTO fixed_assets
+        (id, asset_code, name, category, site, acquisition_date, acquisition_cost, useful_life_years, salvage_value, status, serial_number, warranty_expiry, notes, image_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [
+        a.id, a.assetCode, a.name, a.category, a.site, a.acquisitionDate, a.acquisitionCost,
+        a.usefulLifeYears, a.salvageValue, a.status || 'Active', a.serialNumber || null,
+        a.warrantyExpiry || null, a.notes || '', a.imageUrl || null,
+      ]
+    );
+    return mapFixedAsset(rows[0]);
+  },
+  async update(id, patch) {
+    const map = {
+      assetCode: 'asset_code', name: 'name', category: 'category', site: 'site',
+      acquisitionDate: 'acquisition_date', acquisitionCost: 'acquisition_cost',
+      usefulLifeYears: 'useful_life_years', salvageValue: 'salvage_value', status: 'status',
+      serialNumber: 'serial_number', warrantyExpiry: 'warranty_expiry', notes: 'notes', imageUrl: 'image_url',
+    };
+    const fields = [];
+    const values = [];
+    let i = 1;
+    for (const [k, col] of Object.entries(map)) {
+      if (patch[k] !== undefined) {
+        fields.push(`${col} = $${i++}`);
+        values.push(patch[k]);
+      }
+    }
+    if (fields.length === 0) return this.find(id);
+    values.push(id);
+    const { rows } = await query(`UPDATE fixed_assets SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`, values);
+    return rows[0] ? mapFixedAsset(rows[0]) : null;
+  },
+  async remove(id) {
+    const { rowCount } = await query('DELETE FROM fixed_assets WHERE id = $1', [id]);
+    return rowCount > 0;
+  },
+};
+
+// ── Work Orders (Scheduled Maintenance) ─────────────────────────────────
+export const WorkOrders = {
+  async all() {
+    const { rows } = await query('SELECT * FROM work_orders ORDER BY due_date ASC, id ASC');
+    return rows.map(mapWorkOrder);
+  },
+  async find(id) {
+    const { rows } = await query('SELECT * FROM work_orders WHERE id = $1', [id]);
+    return rows[0] ? mapWorkOrder(rows[0]) : null;
+  },
+  async insert(w) {
+    const { rows } = await query(
+      `INSERT INTO work_orders (id, asset_id, title, type, priority, status, due_date, assigned_to, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [w.id, w.assetId, w.title, w.type || 'Preventive', w.priority || 'Medium', w.status || 'Scheduled', w.dueDate, w.assignedTo || null, w.notes || '']
+    );
+    return mapWorkOrder(rows[0]);
+  },
+  async update(id, patch) {
+    const map = {
+      title: 'title', type: 'type', priority: 'priority', status: 'status', dueDate: 'due_date',
+      completedDate: 'completed_date', assignedTo: 'assigned_to', notes: 'notes',
+    };
+    const fields = [];
+    const values = [];
+    let i = 1;
+    for (const [k, col] of Object.entries(map)) {
+      if (patch[k] !== undefined) {
+        fields.push(`${col} = $${i++}`);
+        values.push(patch[k]);
+      }
+    }
+    if (fields.length === 0) return this.find(id);
+    values.push(id);
+    const { rows } = await query(`UPDATE work_orders SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`, values);
+    return rows[0] ? mapWorkOrder(rows[0]) : null;
+  },
+  async complete(id, completedDate) {
+    const { rows } = await query(
+      `UPDATE work_orders SET status = 'Completed', completed_date = $1 WHERE id = $2 RETURNING *`,
+      [completedDate, id]
+    );
+    return rows[0] ? mapWorkOrder(rows[0]) : null;
+  },
+  async remove(id) {
+    const { rowCount } = await query('DELETE FROM work_orders WHERE id = $1', [id]);
     return rowCount > 0;
   },
 };

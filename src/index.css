@@ -2737,6 +2737,48 @@ html[data-theme='light'] .brand-logo-light {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   EAM MODULES — Asset Registry / Work Orders / Reports polish
+   ═══════════════════════════════════════════════════════════ */
+/* Every stat/KPI glass-panel gets a subtle top accent + lift-on-hover so the
+   new EAM views read as "enterprise dashboard" rather than plain boxes. */
+.glass-panel {
+  position: relative;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.glass-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 1.1rem;
+  right: 1.1rem;
+  height: 2px;
+  border-radius: 0 0 3px 3px;
+  background: linear-gradient(90deg, rgba(0, 208, 132, 0.55), rgba(96, 165, 250, 0.35));
+  opacity: 0;
+  transition: opacity 180ms ease;
+  pointer-events: none;
+}
+
+.glass-panel:hover::before {
+  opacity: 1;
+}
+
+.glass-panel:hover {
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.28));
+}
+
+.reports-grid {
+  align-items: stretch;
+}
+
+@media (max-width: 900px) {
+  .reports-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
    REDUCED MOTION
    ═══════════════════════════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {

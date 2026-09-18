@@ -13,12 +13,18 @@ import {
   Images,
   X,
   UserCog,
+  Building2,
+  CalendarClock,
+  BarChart3,
 } from 'lucide-react';
 
 export type AdminView =
   | 'dashboard'
   | 'global-search'
   | 'assets'
+  | 'asset-registry'
+  | 'work-orders'
+  | 'reports'
   | 'categories'
   | 'assignments'
   | 'maintenance'
@@ -44,6 +50,7 @@ const NAV_GROUPS: { title: string; items: { id: AdminView; label: string; icon: 
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'global-search', label: 'Global Search', icon: Search },
+      { id: 'reports', label: 'Laporan', icon: BarChart3 },
     ],
   },
   {
@@ -54,6 +61,13 @@ const NAV_GROUPS: { title: string; items: { id: AdminView; label: string; icon: 
       { id: 'assignments', label: 'Transfer Antar Site', icon: ArrowLeftRight },
       { id: 'maintenance', label: 'Maintenance', icon: Wrench },
       { id: 'audit', label: 'Audit / Log', icon: ClipboardList },
+    ],
+  },
+  {
+    title: 'Aset Tetap (EAM)',
+    items: [
+      { id: 'asset-registry', label: 'Aset Tetap & Depresiasi', icon: Building2 },
+      { id: 'work-orders', label: 'Jadwal Maintenance', icon: CalendarClock },
     ],
   },
   {

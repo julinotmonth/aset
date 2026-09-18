@@ -13,7 +13,7 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import { Activity, AlertTriangle, ArrowRightLeft, PackagePlus, Trash2 } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowRightLeft, PackagePlus, Trash2, Building2, Wrench } from 'lucide-react';
 import type { SparePart, ActivityLog } from '../../types';
 import { CATEGORY_VISUAL } from '../../data/categoryVisuals';
 
@@ -33,6 +33,8 @@ const ACTION_META: Record<ActivityLog['action'], { icon: React.ElementType; colo
   STOCK_UPDATE: { icon: Activity, color: '#38BDF8' },
   ADD_SPARE_PART: { icon: PackagePlus, color: '#A3E635' },
   DELETE_SPARE_PART: { icon: Trash2, color: '#F87171' },
+  ADD_FIXED_ASSET: { icon: Building2, color: '#A78BFA' },
+  WORK_ORDER: { icon: Wrench, color: '#FBBF24' },
 };
 
 function formatCompactIDR(value: number): string {

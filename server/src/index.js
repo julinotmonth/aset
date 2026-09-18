@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import 'dotenv/config';
 import { pool } from './db.js';
 import { migrate } from './migrate.js';
-import { Users, Sites, Categories, SpareParts, Logs, Gallery } from './repo.js';
+import { Users, Sites, Categories, SpareParts, Logs, Gallery, FixedAssets, WorkOrders } from './repo.js';
 import { signToken, requireAuth, requireSuperAdmin } from './auth.js';
 
 const PORT = process.env.PORT || 4000;
@@ -274,6 +274,126 @@ app.delete('/api/gallery/:id', requireAuth, asyncRoute(async (req, res) => {
   if (item.isDefault) return res.status(400).json({ error: 'Foto dokumentasi bawaan tidak bisa dihapus.' });
   await Gallery.remove(req.params.id);
   res.status(204).end();
+}));
+
+// ── Fixed Assets (Asset Registry / Depreciation) ──────────────────────────
+app.get('/api/fixed-assets', requireAuth, asyncRoute(async (_req, res) => res.json(await FixedAssets.all())));
+
+app.post('/api/fixed-assets', requireAuth, asyncRoute(async (req, res) => {
+  const b = req.body || {};
+  if (!b.assetCode || !b.name || !b.site) {
+    return res.status(400).json({ error: 'Kode aset, nama, dan site wajib diisi.' });
+  }
+  const asset = await FixedAssets.insert({
+    id: `fa-${Date.now().toString(36)}`,
+    assetCode: b.assetCode,
+    name: b.name,
+    category: b.category || 'Umum',
+    site: b.site,
+    acquisitionDate: b.acquisitionDate || new Date().toISOString().split('T')[0],
+    acquisitionCost: Number(b.acquisitionCost) || 0,
+    usefulLifeYears: Number(b.usefulLifeYears) || 5,
+    salvageValue: Number(b.salvageValue) || 0,
+    status: b.status || 'Active',
+    serialNumber: b.serialNumber,
+    warrantyExpiry: b.warrantyExpiry,
+    notes: b.notes,
+    imageUrl: b.imageUrl,
+  });
+
+  await Logs.insert({
+    id: `log-${Date.now().toString(36)}`,
+    timestamp: nowTimestamp(),
+    action: 'ADD_SPARE_PART',
+    description: `Aset tetap baru terdaftar: ${asset.name} (${asset.assetCode}) di Site ${String(asset.site).toUpperCase()}`,
+    performedBy: req.body.performedBy || req.auth.email,
+  });
+
+  res.status(201).json(asset);
+}));
+
+app.patch('/api/fixed-assets/:id', requireAuth, asyncRoute(async (req, res) => {
+  const updated = await FixedAssets.update(req.params.id, req.body || {});
+  if (!updated) return res.status(404).json({ error: 'Aset tidak ditemukan.' });
+  res.json(updated);
+}));
+
+app.delete('/api/fixed-assets/:id', requireAuth, asyncRoute(async (req, res) => {
+  const removed = await FixedAssets.remove(req.params.id);
+  if (!removed) return res.status(404).json({ error: 'Aset tidak ditemukan.' });
+  res.status(204).end();
+}));
+
+// ── Work Orders (Scheduled / Preventive Maintenance) ──────────────────────
+app.get('/api/work-orders', requireAuth, asyncRoute(async (_req, res) => res.json(await WorkOrders.all())));
+
+app.post('/api/work-orders', requireAuth, asyncRoute(async (req, res) => {
+  const b = req.body || {};
+  if (!b.assetId || !b.title || !b.dueDate) {
+    return res.status(400).json({ error: 'Aset, judul pekerjaan, dan tanggal jatuh tempo wajib diisi.' });
+  }
+  const wo = await WorkOrders.insert({
+    id: `wo-${Date.now().toString(36)}`,
+    assetId: b.assetId,
+    title: b.title,
+    type: b.type || 'Preventive',
+    priority: b.priority || 'Medium',
+    status: b.status || 'Scheduled',
+    dueDate: b.dueDate,
+    assignedTo: b.assignedTo,
+    notes: b.notes,
+  });
+  res.status(201).json(wo);
+}));
+
+app.patch('/api/work-orders/:id', requireAuth, asyncRoute(async (req, res) => {
+  const updated = await WorkOrders.update(req.params.id, req.body || {});
+  if (!updated) return res.status(404).json({ error: 'Work order tidak ditemukan.' });
+  res.json(updated);
+}));
+
+app.post('/api/work-orders/:id/complete', requireAuth, asyncRoute(async (req, res) => {
+  const updated = await WorkOrders.complete(req.params.id, req.body?.completedDate || new Date().toISOString().split('T')[0]);
+  if (!updated) return res.status(404).json({ error: 'Work order tidak ditemukan.' });
+  res.json(updated);
+}));
+
+app.delete('/api/work-orders/:id', requireAuth, asyncRoute(async (req, res) => {
+  const removed = await WorkOrders.remove(req.params.id);
+  if (!removed) return res.status(404).json({ error: 'Work order tidak ditemukan.' });
+  res.status(204).end();
+}));
+
+// ── Reports (aggregated KPIs for the Reports view) ────────────────────────
+app.get('/api/reports/summary', requireAuth, asyncRoute(async (_req, res) => {
+  const [assets, workOrders, spareParts] = await Promise.all([FixedAssets.all(), WorkOrders.all(), SpareParts.all()]);
+
+  const totalAcquisitionValue = assets.reduce((sum, a) => sum + a.acquisitionCost, 0);
+  const totalBookValue = assets.reduce((sum, a) => sum + a.bookValue, 0);
+  const totalAccumulatedDepreciation = assets.reduce((sum, a) => sum + a.accumulatedDepreciation, 0);
+
+  const byCategory = {};
+  for (const a of assets) {
+    byCategory[a.category] = byCategory[a.category] || { category: a.category, acquisitionCost: 0, bookValue: 0, count: 0 };
+    byCategory[a.category].acquisitionCost += a.acquisitionCost;
+    byCategory[a.category].bookValue += a.bookValue;
+    byCategory[a.category].count += 1;
+  }
+
+  const overdueWorkOrders = workOrders.filter((w) => w.status === 'Overdue').length;
+  const upcomingWorkOrders = workOrders.filter((w) => w.status === 'Scheduled').length;
+  const completedWorkOrders = workOrders.filter((w) => w.status === 'Completed').length;
+  const totalInventoryValue = spareParts.reduce((sum, p) => sum + p.priceEstimate * p.stock, 0);
+
+  res.json({
+    totalAssets: assets.length,
+    totalAcquisitionValue,
+    totalBookValue,
+    totalAccumulatedDepreciation,
+    totalInventoryValue,
+    assetsByCategory: Object.values(byCategory),
+    workOrders: { overdue: overdueWorkOrders, upcoming: upcomingWorkOrders, completed: completedWorkOrders, total: workOrders.length },
+  });
 }));
 
 app.use((req, res) => res.status(404).json({ error: `No route: ${req.method} ${req.path}` }));

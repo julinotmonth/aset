@@ -20,7 +20,7 @@ import {
   ArrowRight,
   ChevronDown,
 } from 'lucide-react';
-import type { AuthState, SparePart, SiteFilter, ActivityLog, SiteLocation, AppUser } from '../../types';
+import type { AuthState, SparePart, SiteFilter, ActivityLog, SiteLocation, AppUser, FixedAsset, WorkOrder, ReportsSummary } from '../../types';
 import { getSparePartCategories } from '../../data/categoryStore';
 import { getSites, useSitesRefresh } from '../../data/siteStore';
 import { api } from '../../lib/api';
@@ -47,6 +47,7 @@ import {
   timeAgo,
   SITE_LABEL,
 } from './AdminExtraViews';
+import { AssetRegistryView, WorkOrdersView, ReportsView } from './AssetManagementViews';
 
 interface AdminDashboardProps {
   auth: AuthState;
@@ -83,8 +84,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   const [spareParts, setSpareParts] = useState<SparePart[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [fixedAssets, setFixedAssets] = useState<FixedAsset[]>([]);
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [reportsSummary, setReportsSummary] = useState<ReportsSummary | null>(null);
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+
+  const reloadAssetData = async () => {
+    const [assetsRes, workOrdersRes, summaryRes] = await Promise.allSettled([
+      api.get<FixedAsset[]>('/fixed-assets'),
+      api.get<WorkOrder[]>('/work-orders'),
+      api.get<ReportsSummary>('/reports/summary'),
+    ]);
+    if (assetsRes.status === 'fulfilled') setFixedAssets(assetsRes.value);
+    if (workOrdersRes.status === 'fulfilled') setWorkOrders(workOrdersRes.value);
+    if (summaryRes.status === 'fulfilled') setReportsSummary(summaryRes.value);
+  };
 
   // Spare parts / logs / (for Super Admins) users now live in the backend —
   // fetch them once on mount instead of reading localStorage. `users` 404s
@@ -94,15 +109,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
     let cancelled = false;
     (async () => {
       try {
-        const [partsRes, logsRes, usersRes] = await Promise.allSettled([
+        const [partsRes, logsRes, usersRes, assetsRes, workOrdersRes, summaryRes] = await Promise.allSettled([
           api.get<SparePart[]>('/spare-parts'),
           api.get<ActivityLog[]>('/logs'),
           api.get<AppUser[]>('/users'),
+          api.get<FixedAsset[]>('/fixed-assets'),
+          api.get<WorkOrder[]>('/work-orders'),
+          api.get<ReportsSummary>('/reports/summary'),
         ]);
         if (cancelled) return;
         if (partsRes.status === 'fulfilled') setSpareParts(partsRes.value);
         if (logsRes.status === 'fulfilled') setLogs(logsRes.value);
         if (usersRes.status === 'fulfilled') setUsers(usersRes.value);
+        if (assetsRes.status === 'fulfilled') setFixedAssets(assetsRes.value);
+        if (workOrdersRes.status === 'fulfilled') setWorkOrders(workOrdersRes.value);
+        if (summaryRes.status === 'fulfilled') setReportsSummary(summaryRes.value);
         if (partsRes.status === 'rejected' || logsRes.status === 'rejected') {
           setLoadError('Sebagian data gagal dimuat dari server. Coba muat ulang halaman.');
         }
@@ -349,6 +370,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
       if (target) showToast(`Spare part ${target.name} dihapus.`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Gagal menghapus spare part.');
+    }
+  };
+
+  // ── Fixed Assets (Asset Registry / Depreciation) ─────────────────────────
+  const handleSaveFixedAsset = async (patch: Partial<FixedAsset>) => {
+    try {
+      if (patch.id) {
+        const updated = await api.patch<FixedAsset>(`/fixed-assets/${encodeURIComponent(patch.id)}`, patch);
+        setFixedAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+        showToast(`Aset ${updated.assetCode} berhasil diperbarui.`);
+      } else {
+        const created = await api.post<FixedAsset>('/fixed-assets', { ...patch, performedBy: auth.username });
+        setFixedAssets((prev) => [created, ...prev]);
+        showToast(`Aset tetap baru "${created.name}" berhasil didaftarkan.`);
+      }
+      reloadAssetData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal menyimpan aset tetap.');
+    }
+  };
+
+  const handleDeleteFixedAsset = async (id: string) => {
+    const target = fixedAssets.find((a) => a.id === id);
+    try {
+      await api.delete(`/fixed-assets/${encodeURIComponent(id)}`);
+      setFixedAssets((prev) => prev.filter((a) => a.id !== id));
+      if (target) showToast(`Aset ${target.name} dihapus.`);
+      reloadAssetData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal menghapus aset. Pastikan tidak ada work order aktif yang terkait.');
+    }
+  };
+
+  // ── Work Orders (Scheduled Maintenance) ──────────────────────────────────
+  const handleSaveWorkOrder = async (patch: Partial<WorkOrder>) => {
+    try {
+      if (patch.id) {
+        const updated = await api.patch<WorkOrder>(`/work-orders/${encodeURIComponent(patch.id)}`, patch);
+        setWorkOrders((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+        showToast('Work order berhasil diperbarui.');
+      } else {
+        const created = await api.post<WorkOrder>('/work-orders', patch);
+        setWorkOrders((prev) => [created, ...prev]);
+        showToast(`Pekerjaan "${created.title}" berhasil dijadwalkan.`);
+      }
+      reloadAssetData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal menyimpan work order.');
+    }
+  };
+
+  const handleCompleteWorkOrder = async (id: string) => {
+    try {
+      const updated = await api.post<WorkOrder>(`/work-orders/${encodeURIComponent(id)}/complete`, {});
+      setWorkOrders((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+      showToast('Work order ditandai selesai.');
+      reloadAssetData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal menyelesaikan work order.');
+    }
+  };
+
+  const handleDeleteWorkOrder = async (id: string) => {
+    if (!confirm('Hapus work order ini?')) return;
+    try {
+      await api.delete(`/work-orders/${encodeURIComponent(id)}`);
+      setWorkOrders((prev) => prev.filter((w) => w.id !== id));
+      showToast('Work order dihapus.');
+      reloadAssetData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal menghapus work order.');
     }
   };
 
@@ -684,6 +776,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
             onFlagMaintenance={handleFlagMaintenance}
             onResolveMaintenance={handleResolveMaintenance}
           />
+        )}
+        {activeView === 'asset-registry' && (
+          <AssetRegistryView fixedAssets={fixedAssets} onSave={handleSaveFixedAsset} onDelete={handleDeleteFixedAsset} />
+        )}
+        {activeView === 'work-orders' && (
+          <WorkOrdersView
+            workOrders={workOrders}
+            fixedAssets={fixedAssets}
+            onSave={handleSaveWorkOrder}
+            onComplete={handleCompleteWorkOrder}
+            onDelete={handleDeleteWorkOrder}
+          />
+        )}
+        {activeView === 'reports' && (
+          <ReportsView summary={reportsSummary} fixedAssets={fixedAssets} workOrders={workOrders} />
         )}
         {activeView === 'audit' && <AuditView logs={logs} />}
         {activeView === 'branches' && (

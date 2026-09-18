@@ -13,6 +13,24 @@ async function runSchema() {
   console.log('[migrate] Schema is up to date.');
 }
 
+// Widens the activity_logs.action CHECK constraint for databases created
+// before ADD_FIXED_ASSET / WORK_ORDER existed — CREATE TABLE IF NOT EXISTS
+// in schema.sql alone can't alter a constraint on an already-existing table.
+async function fixActivityLogConstraint() {
+  await query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'activity_logs_action_check'
+      ) THEN
+        ALTER TABLE activity_logs DROP CONSTRAINT activity_logs_action_check;
+      END IF;
+      ALTER TABLE activity_logs ADD CONSTRAINT activity_logs_action_check
+        CHECK (action IN ('TRANSFER', 'STOCK_UPDATE', 'ADD_SPARE_PART', 'DELETE_SPARE_PART', 'ADD_FIXED_ASSET', 'WORK_ORDER'));
+    END $$;
+  `);
+}
+
 async function seedSites() {
   const { rows } = await query('SELECT COUNT(*)::int AS count FROM sites');
   if (rows[0].count > 0) return;
@@ -137,14 +155,69 @@ async function seedGallery() {
   console.log('[migrate] Seeded default gallery photos.');
 }
 
+async function seedFixedAssets() {
+  const { rows } = await query('SELECT COUNT(*)::int AS count FROM fixed_assets');
+  if (rows[0].count > 0) return;
+
+  // [id, assetCode, name, category, site, acquisitionDate, cost, usefulLifeYears, salvageValue, status, serialNumber, warrantyExpiry]
+  const assets = [
+    ['fa-001', 'FA-BEK-001', 'Bauer CNG Compressor Unit (4-Stage) B-Series', 'Compressors', 'bekasi', '2022-03-01', 1850000000, 12, 120000000, 'Active', 'BAUER-4S-2201', '2027-03-01'],
+    ['fa-002', 'FA-BEK-002', 'Mother Station Dispenser Skid Rack A', 'Dispensing Equipment', 'bekasi', '2021-06-15', 620000000, 10, 40000000, 'Active', 'MSD-RACK-A19', '2026-06-15'],
+    ['fa-003', 'FA-IND-001', 'Cryogenic LNG Microbulk Storage Tank (30m³)', 'Storage Tanks', 'indramayu', '2023-01-20', 2400000000, 20, 300000000, 'Active', 'CRY-TANK-30M3', '2033-01-20'],
+    ['fa-004', 'FA-IND-002', 'Submerged Cryogenic LNG Transfer Pump', 'Pumps', 'indramayu', '2020-09-10', 780000000, 8, 60000000, 'Under Maintenance', 'SUB-PMP-8820', '2025-09-10'],
+    ['fa-005', 'FA-BLO-001', 'Biomass Wellhead Processing Unit', 'Processing Equipment', 'blora', '2019-11-05', 3100000000, 15, 250000000, 'Active', 'BIO-WH-1105', '2024-11-05'],
+    ['fa-006', 'FA-BLO-002', 'Biomass Conveyor & Feeder Line System', 'Conveyor Systems', 'blora', '2021-02-18', 540000000, 10, 30000000, 'Active', 'BIO-CNV-2118', '2026-02-18'],
+    ['fa-007', 'FA-SET-001', 'Compressor Station Skid (Setu Fleet Room)', 'Compressors', 'setu', '2020-05-22', 1450000000, 12, 100000000, 'Active', 'SET-COMP-0522', '2025-05-22'],
+    ['fa-008', 'FA-SET-002', 'Fleet Room HVAC Split-AC Climate Unit x4', 'Facility Equipment', 'setu', '2022-08-01', 185000000, 7, 15000000, 'Active', 'HVAC-SET-0801', '2027-08-01'],
+    ['fa-009', 'FA-BEK-003', 'Diesel Backup Generator Set 500kVA', 'Power & Electrical', 'bekasi', '2018-04-12', 890000000, 15, 80000000, 'Active', 'GEN-500KVA-1804', '2023-04-12'],
+    ['fa-010', 'FA-IND-003', 'Distribution Truck — Isuzu Giga LNG Trailer', 'Vehicles', 'indramayu', '2023-07-01', 2100000000, 8, 400000000, 'Active', 'ISZ-GIGA-2307', '2026-07-01'],
+  ];
+  for (const [id, assetCode, name, category, site, acquisitionDate, cost, life, salvage, status, serial, warranty] of assets) {
+    await query(
+      `INSERT INTO fixed_assets (id, asset_code, name, category, site, acquisition_date, acquisition_cost, useful_life_years, salvage_value, status, serial_number, warranty_expiry, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'')`,
+      [id, assetCode, name, category, site, acquisitionDate, cost, life, salvage, status, serial, warranty]
+    );
+  }
+  console.log('[migrate] Seeded default fixed assets.');
+}
+
+async function seedWorkOrders() {
+  const { rows } = await query('SELECT COUNT(*)::int AS count FROM work_orders');
+  if (rows[0].count > 0) return;
+
+  // [id, assetId, title, type, priority, status, dueDate, assignedTo]
+  const orders = [
+    ['wo-001', 'fa-001', 'Penggantian Seal Kit Piston Tahap 3', 'Preventive', 'High', 'Scheduled', '2026-09-25', 'Budi Santoso'],
+    ['wo-002', 'fa-004', 'Perbaikan Bearing Set Pompa Cryogenic', 'Corrective', 'Urgent', 'In Progress', '2026-09-08', 'Hendra Gunawan'],
+    ['wo-003', 'fa-005', 'Inspeksi Tahunan Unit Pemrosesan Biomassa', 'Inspection', 'Medium', 'Scheduled', '2026-11-05', 'Budi Santoso'],
+    ['wo-004', 'fa-009', 'Servis Rutin Genset Diesel 500kVA', 'Preventive', 'Medium', 'Completed', '2026-08-10', 'Hendra Gunawan'],
+    ['wo-005', 'fa-002', 'Kalibrasi Dispenser Skid Rack A', 'Preventive', 'Low', 'Scheduled', '2026-10-15', 'Budi Santoso'],
+    ['wo-006', 'fa-007', 'Penggantian Filter Udara Compressor Skid', 'Preventive', 'Medium', 'Scheduled', '2026-09-01', 'Hendra Gunawan'],
+    ['wo-007', 'fa-008', 'Perawatan Rutin HVAC Fleet Room', 'Preventive', 'Low', 'Completed', '2026-07-20', 'Budi Santoso'],
+  ];
+  for (const [id, assetId, title, type, priority, status, dueDate, assignedTo] of orders) {
+    const completedDate = status === 'Completed' ? dueDate : null;
+    await query(
+      `INSERT INTO work_orders (id, asset_id, title, type, priority, status, due_date, completed_date, assigned_to, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'')`,
+      [id, assetId, title, type, priority, status, dueDate, completedDate, assignedTo]
+    );
+  }
+  console.log('[migrate] Seeded default work orders.');
+}
+
 export async function migrate() {
   await runSchema();
+  await fixActivityLogConstraint();
   await seedSites();
   await seedCategories();
   await seedUsers();
   await seedSpareParts();
   await seedLogs();
   await seedGallery();
+  await seedFixedAssets();
+  await seedWorkOrders();
 }
 
 // Allows running standalone: `npm run migrate`
