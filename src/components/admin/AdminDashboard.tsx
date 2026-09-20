@@ -31,6 +31,7 @@ import { AddEditSparePartModal } from './AddEditSparePartModal';
 import { UserFormModal } from './UserFormModal';
 import { AdminAnalytics } from './AdminAnalytics';
 import { Sidebar, type AdminView } from './Sidebar';
+import { WeeklyReportView } from './WeeklyReportView';
 import {
   GlobalSearchView,
   CategoriesView,
@@ -792,6 +793,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         {activeView === 'reports' && (
           <ReportsView summary={reportsSummary} fixedAssets={fixedAssets} workOrders={workOrders} />
         )}
+        {activeView === 'weekly-report' && <WeeklyReportView auth={auth} />}
         {activeView === 'audit' && <AuditView logs={logs} />}
         {activeView === 'branches' && (
           <BranchesView spareParts={spareParts} onSitesChanged={() => setSitesVersion((v) => v + 1)} />

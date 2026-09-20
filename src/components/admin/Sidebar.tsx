@@ -15,6 +15,7 @@ import {
   UserCog,
   Building2,
   CalendarClock,
+  CalendarRange,
   BarChart3,
 } from 'lucide-react';
 
@@ -25,6 +26,7 @@ export type AdminView =
   | 'asset-registry'
   | 'work-orders'
   | 'reports'
+  | 'weekly-report'
   | 'categories'
   | 'assignments'
   | 'maintenance'
@@ -51,6 +53,7 @@ const NAV_GROUPS: { title: string; items: { id: AdminView; label: string; icon: 
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'global-search', label: 'Global Search', icon: Search },
       { id: 'reports', label: 'Laporan', icon: BarChart3 },
+      { id: 'weekly-report', label: 'Laporan Mingguan', icon: CalendarRange },
     ],
   },
   {
