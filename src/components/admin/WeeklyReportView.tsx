@@ -31,6 +31,7 @@ interface WeeklyRow {
   alokasi: string; detailAlokasi: string; pic: string;
   harga: number; totalHarga: number; noMr: string; genBus: string;
   statusSmr: string; noShipment: string; keterangan: string; section: Section;
+  jenis: string; merk: string; tipe: string; hargaEstimasi?: number;
 }
 
 interface SheetSource {
@@ -270,7 +271,7 @@ export function WeeklyReportView({ auth }: Props) {
   // Filter per-minggu + sortir kolom untuk tabel Barang Masuk — supaya bisa
   // fokus menganalisa satu minggu tanpa harus mengganti filter periode utama.
   const [minggFilterMasuk, setMinggFilterMasuk] = useState<number | 0>(0);
-  type KolomMasuk = 'tanggal' | 'minggu' | 'namaBarang' | 'alokasi' | 'jumlah' | 'totalHarga';
+  type KolomMasuk = 'tanggal' | 'minggu' | 'kode' | 'namaBarang' | 'alokasi' | 'jumlah' | 'totalHarga';
   const [sortKolom, setSortKolom] = useState<KolomMasuk>('totalHarga');
   const [sortMenurun, setSortMenurun] = useState(true);
 
@@ -302,9 +303,10 @@ export function WeeklyReportView({ auth }: Props) {
   // tanpa memakai sumbu minggu seperti dua mode lainnya.
   const aset = useMemo(() => {
     const perLokasi: Record<string, number> = {};
-    let nilai = 0, qty = 0;
+    let nilai = 0, nilaiEstimasi = 0, qty = 0;
     for (const r of rows) {
       nilai += r.totalHarga;
+      if (!r.totalHarga && r.hargaEstimasi) nilaiEstimasi += r.hargaEstimasi;
       qty += r.jumlah;
       perLokasi[r.alokasi] = (perLokasi[r.alokasi] ?? 0) + 1;
     }
@@ -312,14 +314,31 @@ export function WeeklyReportView({ auth }: Props) {
     const atas = lokasi.slice(0, 7);
     const sisa = lokasi.slice(7).reduce((s, k) => s + k.value, 0);
     if (sisa > 0) atas.push({ name: 'Lainnya', value: sisa });
+
+    // Kelompokkan per sub-bab (mis. "Main Office") persis seperti pembagian
+    // baris di sheet "LIST ALL ASET ..." — urutan sub-bab mengikuti urutan
+    // kemunculan pertamanya di sheet, item di dalamnya diurutkan nama.
+    const urutanSubBab: string[] = [];
+    const perSubBab: Record<string, WeeklyRow[]> = {};
+    for (const r of rows) {
+      const key = r.detailAlokasi?.trim() || 'Tanpa Sub-Bab';
+      if (!perSubBab[key]) { perSubBab[key] = []; urutanSubBab.push(key); }
+      perSubBab[key].push(r);
+    }
+    const subBab = urutanSubBab.map((nama) => ({
+      nama,
+      item: [...perSubBab[nama]].sort((a, b) => a.namaBarang.localeCompare(b.namaBarang)),
+    }));
+
     return {
-      nilai, qty, baris: rows.length, lokasiUnik: lokasi.length,
+      nilai, nilaiEstimasi, qty, baris: rows.length, lokasiUnik: lokasi.length,
       pieLokasi: atas,
+      subBab,
       semua: [...rows].sort((a, b) => a.namaBarang.localeCompare(b.namaBarang)),
     };
   }, [rows]);
 
-  type KolomAset = 'kode' | 'namaBarang' | 'alokasi' | 'jumlah' | 'totalHarga' | 'statusSmr';
+  type KolomAset = 'kode' | 'namaBarang' | 'jenis' | 'merk' | 'tipe' | 'alokasi' | 'tahun' | 'jumlah' | 'totalHarga' | 'statusSmr';
   const [cariAset, setCariAset] = useState('');
   const [sortKolomAset, setSortKolomAset] = useState<KolomAset>('namaBarang');
   const [sortMenurunAset, setSortMenurunAset] = useState(false);
@@ -332,7 +351,7 @@ export function WeeklyReportView({ auth }: Props) {
   const dataAsetTampil = useMemo(() => {
     const q = cariAset.trim().toLowerCase();
     const dasar = q
-      ? aset.semua.filter((r) => `${r.kode} ${r.namaBarang} ${r.alokasi}`.toLowerCase().includes(q))
+      ? aset.semua.filter((r) => `${r.kode} ${r.namaBarang} ${r.alokasi} ${r.detailAlokasi} ${r.jenis} ${r.merk} ${r.tipe}`.toLowerCase().includes(q))
       : aset.semua;
     const arah2 = sortMenurunAset ? -1 : 1;
     return [...dasar].sort((a, b) => {
@@ -341,6 +360,18 @@ export function WeeklyReportView({ auth }: Props) {
       return arah2 * ((Number(x) || 0) - (Number(y) || 0));
     });
   }, [aset.semua, cariAset, sortKolomAset, sortMenurunAset]);
+
+  // Sub-bab (mis. "Main Office") yang lolos pencarian, dengan urutan &
+  // sortir kolom yang sama seperti tabel datar di atas.
+  const subBabTampil = useMemo(() => {
+    const urutan = new Map(dataAsetTampil.map((r, i) => [r.id, i]));
+    return aset.subBab
+      .map((g) => ({
+        nama: g.nama,
+        item: g.item.filter((r) => urutan.has(r.id)).sort((a, b) => (urutan.get(a.id)! - urutan.get(b.id)!)),
+      }))
+      .filter((g) => g.item.length > 0);
+  }, [aset.subBab, dataAsetTampil]);
 
   useEffect(() => { setCariAset(''); }, [site, arah]);
 
@@ -721,7 +752,8 @@ export function WeeklyReportView({ auth }: Props) {
                   <tr style={{ background: 'var(--panel-solid, #10182b)' }}>
                     {([
                       ['tanggal', 'Tanggal', 'left'], ['minggu', 'Minggu', 'left'],
-                      ['namaBarang', 'Nama Barang', 'left'], ['alokasi', 'Alokasi', 'left'],
+                      ['kode', 'Kode', 'left'], ['namaBarang', 'Nama Barang', 'left'],
+                      ['alokasi', 'Alokasi', 'left'],
                       ['jumlah', 'Jumlah', 'right'], ['totalHarga', 'Total Harga', 'right'],
                     ] as [KolomMasuk, string, 'left' | 'right'][]).map(([kolom, label, align]) => (
                       <th key={kolom} onClick={() => gantiSort(kolom)}
@@ -736,6 +768,7 @@ export function WeeklyReportView({ auth }: Props) {
                     <tr key={r.id}>
                       <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)', whiteSpace: 'nowrap' }}>{r.tanggal ?? '-'}</td>
                       <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>W{r.minggu}</td>
+                      <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)', whiteSpace: 'nowrap' }}>{r.kode || '-'}</td>
                       <td style={{ padding: '.4rem .6rem', fontSize: '.75rem', color: 'var(--txt-primary)' }}>{r.namaBarang}</td>
                       <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.alokasi}</td>
                       <td style={tdAngka}>{r.jumlah.toLocaleString('id-ID')} {r.satuan}</td>
@@ -743,7 +776,7 @@ export function WeeklyReportView({ auth }: Props) {
                     </tr>
                   ))}
                   {!dataMasukTampil.length && (
-                    <tr><td colSpan={6} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--txt-muted)', fontSize: '.78rem' }}>
+                    <tr><td colSpan={7} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--txt-muted)', fontSize: '.78rem' }}>
                       Tidak ada barang masuk pada minggu ini.
                     </td></tr>
                   )}
@@ -771,7 +804,8 @@ export function WeeklyReportView({ auth }: Props) {
               sub={`MS ${labelSite}`} />
             <KartuKpi ikon={Boxes} warna="#00D084" label="Total Kuantitas" nilai={aset.qty.toLocaleString('id-ID')}
               sub="gabungan semua satuan" />
-            <KartuKpi ikon={TrendingUp} warna="#FBBF24" label="Nilai Total Aset" nilai={rupiahPenuh(aset.nilai)} />
+            <KartuKpi ikon={TrendingUp} warna="#FBBF24" label="Nilai Total Aset" nilai={rupiahPenuh(aset.nilai + aset.nilaiEstimasi)}
+              sub={aset.nilaiEstimasi > 0 ? `termasuk ≈${rupiahPenuh(aset.nilaiEstimasi)} estimasi` : undefined} />
             <KartuKpi ikon={TrendingDown} warna="#C084FC" label="Lokasi / Kategori" nilai={String(aset.lokasiUnik)}
               sub="titik alokasi berbeda" />
           </div>
@@ -815,12 +849,13 @@ export function WeeklyReportView({ auth }: Props) {
             </div>
 
             <div style={{ maxHeight: 560, overflowY: 'auto', overflowX: 'auto' }}>
-              <table className="simple-table" style={{ minWidth: 820, borderCollapse: 'collapse', width: '100%' }}>
+              <table className="simple-table" style={{ minWidth: 1180, borderCollapse: 'collapse', width: '100%' }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr style={{ background: 'var(--panel-solid, #10182b)' }}>
                     {([
                       ['kode', 'Kode', 'left'], ['namaBarang', 'Nama Aset', 'left'],
-                      ['alokasi', 'Lokasi / Kategori', 'left'], ['statusSmr', 'Kondisi', 'left'],
+                      ['jenis', 'Kategori', 'left'], ['merk', 'Merk', 'left'], ['tipe', 'Type', 'left'],
+                      ['alokasi', 'Lokasi', 'left'], ['statusSmr', 'Kondisi', 'left'], ['tahun', 'Tahun', 'left'],
                       ['jumlah', 'Jumlah', 'right'], ['totalHarga', 'Nilai', 'right'],
                     ] as [KolomAset, string, 'left' | 'right'][]).map(([kolom, label, align]) => (
                       <th key={kolom} onClick={() => gantiSortAset(kolom)}
@@ -831,18 +866,40 @@ export function WeeklyReportView({ auth }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {dataAsetTampil.map((r) => (
-                    <tr key={r.id}>
-                      <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)', whiteSpace: 'nowrap' }}>{r.kode || '-'}</td>
-                      <td style={{ padding: '.4rem .6rem', fontSize: '.75rem', color: 'var(--txt-primary)' }}>{r.namaBarang}</td>
-                      <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.alokasi}</td>
-                      <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.statusSmr || '-'}</td>
-                      <td style={tdAngka}>{r.jumlah.toLocaleString('id-ID')} {r.satuan}</td>
-                      <td style={{ ...tdAngka, fontWeight: 600 }}>{r.totalHarga ? rupiahPenuh(r.totalHarga) : '-'}</td>
-                    </tr>
+                  {subBabTampil.map((g) => (
+                    <Fragment key={g.nama}>
+                      <tr>
+                        <td colSpan={10} style={{
+                          padding: '.45rem .6rem', fontSize: '.72rem', fontWeight: 700,
+                          color: '#0B1220', background: '#60A5FA', letterSpacing: '.02em',
+                        }}>
+                          {g.nama} <span style={{ fontWeight: 500, opacity: .75 }}>· {g.item.length.toLocaleString('id-ID')} aset</span>
+                        </td>
+                      </tr>
+                      {g.item.map((r) => (
+                        <tr key={r.id}>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)', whiteSpace: 'nowrap' }}>{r.kode || '-'}</td>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.75rem', color: 'var(--txt-primary)' }}>{r.namaBarang}</td>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.jenis || '-'}</td>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.merk || '-'}</td>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.tipe || '-'}</td>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.alokasi}</td>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.statusSmr || '-'}</td>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.74rem', color: 'var(--txt-muted)' }}>{r.tahun || '-'}</td>
+                          <td style={tdAngka}>{r.jumlah.toLocaleString('id-ID')} {r.satuan}</td>
+                          <td style={{ ...tdAngka, fontWeight: 600 }}>
+                            {r.totalHarga
+                              ? rupiahPenuh(r.totalHarga)
+                              : r.hargaEstimasi
+                                ? <span title="Diestimasi dari pembelian dengan nama & tanggal terdekat di Barang Masuk — bukan harga tercatat langsung, karena sheet aset tidak punya kolom harga." style={{ fontStyle: 'italic', opacity: .75, fontWeight: 500, cursor: 'help' }}>≈ {rupiahPenuh(r.hargaEstimasi)}</span>
+                                : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
                   {!dataAsetTampil.length && (
-                    <tr><td colSpan={6} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--txt-muted)', fontSize: '.78rem' }}>
+                    <tr><td colSpan={10} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--txt-muted)', fontSize: '.78rem' }}>
                       Tidak ada aset yang cocok dengan pencarian.
                     </td></tr>
                   )}
@@ -854,10 +911,13 @@ export function WeeklyReportView({ auth }: Props) {
           <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginTop: '1rem', fontSize: '.78rem', color: 'var(--txt-muted)', lineHeight: 1.7 }}>
             <strong style={{ color: 'var(--txt-primary)' }}>NB:</strong> MS {labelSite.toUpperCase()} memiliki{' '}
             <strong style={{ color: '#60A5FA' }}>{aset.baris}</strong> baris aset terdaftar di{' '}
-            <strong style={{ color: '#60A5FA' }}>{aset.lokasiUnik}</strong> lokasi/kategori, dengan estimasi nilai total{' '}
-            <strong style={{ color: '#60A5FA' }}>{rupiahPenuh(aset.nilai)}</strong>. Daftar ini diambil dari tab
-            “LIST ALL ASET MS {labelSite.toUpperCase()}” pada Google Spreadsheet site — atur di panel Sumber Sheet
-            kalau nama tabnya berbeda.
+            <strong style={{ color: '#60A5FA' }}>{aset.lokasiUnik}</strong> lokasi
+            {aset.nilai > 0 && <> , dengan nilai tercatat <strong style={{ color: '#60A5FA' }}>{rupiahPenuh(aset.nilai)}</strong></>}
+            {aset.nilaiEstimasi > 0 && <> {aset.nilai > 0 ? 'ditambah' : 'dengan'} estimasi <strong style={{ color: '#FBBF24' }}>{rupiahPenuh(aset.nilaiEstimasi)}</strong> lagi (kolom bertanda “≈”) dari harga pembelian di Barang Masuk yang nama & tanggalnya paling cocok</>}
+            . Kolom Kategori/Merk/Type/Tahun
+            diambil langsung dari kolom "Jenis"/"Merk"/"Type"/"Tahun" di sheet — kosong (“-”) berarti sel itu memang
+            kosong di spreadsheet. Daftar ini diambil dari tab “LIST ALL ASET MS {labelSite.toUpperCase()}” pada
+            Google Spreadsheet site — atur di panel Sumber Sheet kalau nama tabnya berbeda.
           </div>
         </>
       )}

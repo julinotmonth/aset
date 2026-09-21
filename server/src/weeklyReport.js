@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS weekly_report_rows (
   status_smr     TEXT NOT NULL DEFAULT '',
   no_shipment    TEXT NOT NULL DEFAULT '',
   keterangan     TEXT NOT NULL DEFAULT '',
+  jenis          TEXT NOT NULL DEFAULT '',
+  merk           TEXT NOT NULL DEFAULT '',
+  tipe           TEXT NOT NULL DEFAULT '',
   section        TEXT NOT NULL DEFAULT 'MAINT'
                    CHECK (section IN ('MAINT','OH','OLI','LAIN')),
   imported_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -45,6 +48,13 @@ CREATE TABLE IF NOT EXISTS weekly_report_rows (
 );
 CREATE INDEX IF NOT EXISTS idx_wrr_site_periode ON weekly_report_rows(site, tahun, bulan);
 CREATE INDEX IF NOT EXISTS idx_wrr_minggu ON weekly_report_rows(site, minggu);
+
+-- Kolom Jenis/Merk/Tipe ditambahkan belakangan (sheet "LIST ALL ASET ...") —
+-- ALTER di sini supaya DB yang sudah ada sebelum kolom ini ada ikut terupdate
+-- (CREATE TABLE IF NOT EXISTS di atas tidak mengubah tabel yang sudah dibuat).
+ALTER TABLE weekly_report_rows ADD COLUMN IF NOT EXISTS jenis TEXT NOT NULL DEFAULT '';
+ALTER TABLE weekly_report_rows ADD COLUMN IF NOT EXISTS merk  TEXT NOT NULL DEFAULT '';
+ALTER TABLE weekly_report_rows ADD COLUMN IF NOT EXISTS tipe  TEXT NOT NULL DEFAULT '';
 
 -- Konfigurasi sumber sheet per site (dipakai tombol Sync & auto-sync).
 CREATE TABLE IF NOT EXISTS weekly_report_sources (
@@ -120,6 +130,11 @@ export function parseTanggal(raw) {
   }
   m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  // Sel bertipe Tanggal asli (bukan teks) di Google Sheets sering diekspor CSV
+  // pakai format singkat tahun 2 digit ("17/09/26") — tanpa ini kena strip
+  // parseAngka() dan jadi angka sampah ("170926").
+  m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/);
+  if (m) return `20${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
@@ -158,19 +173,31 @@ export function parseAngka(raw) {
   return negatif ? -hasil : hasil;
 }
 
-const norm = (h) => String(h || '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Titik dibuang sebelum dibandingkan supaya "No. MR", "Ket WR.", "No. PO" dst.
+// (format kolom di tab RDA IN) cocok dengan entri HEADER_MAP di bawah, yang
+// sebelumnya ditulis tanpa titik — sebelumnya kolom-kolom ini gagal ke-map
+// sama sekali sehingga Supplier/No.MR/Ket WR./No.WR pada tab RDA IN tidak
+// pernah tersimpan.
+const norm = (h) => String(h || '').toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
 
 const HEADER_MAP = {
   'tanggal': 'tanggal', 'minggu': 'minggu', 'bulan': 'bulan', 'tahun': 'tahun',
-  'kode': 'kode', 'no aset': 'kode', 'no. aset': 'kode', 'kode aset': 'kode', 'asset code': 'kode',
-  'nama barang': 'namaBarang', 'nama aset': 'namaBarang', 'nama': 'namaBarang',
+  'kode': 'kode', 'no aset': 'kode', 'kode aset': 'kode', 'kode asset': 'kode', 'asset code': 'kode',
+  'nama barang': 'namaBarang', 'nama aset': 'namaBarang', 'nama item': 'namaBarang', 'nama': 'namaBarang',
   'jumlah': 'jumlah', 'qty': 'jumlah', 'satuan': 'satuan',
   'alokasi': 'alokasi', 'kategori': 'alokasi', 'lokasi': 'alokasi', 'lokasi penempatan': 'alokasi',
+  // Tab "... RDA IN" tidak punya kolom Alokasi — kolom Supplier adalah padanan
+  // terdekatnya (siapa/dari mana barang masuk), jadi dipetakan ke field yang
+  // sama supaya kolom ALOKASI di halaman "Barang Masuk" tidak selalu "OTHERS".
+  'supplier': 'alokasi',
   'detail alokasi': 'detailAlokasi', 'pic': 'pic', 'rh': 'rh',
   'harga': 'harga', 'total harga': 'totalHarga', 'nilai': 'totalHarga',
   'no mr': 'noMr', 'gen bus': 'genBus',
   'status s / mr': 'statusSmr', 'status s/mr': 'statusSmr', 'status': 'statusSmr', 'kondisi': 'statusSmr',
-  'no shipment': 'noShipment', 'ket': 'keterangan', 'keterangan': 'keterangan',
+  'no shipment': 'noShipment', 'no wr': 'noShipment',
+  'ket': 'keterangan', 'keterangan': 'keterangan', 'ket wr': 'keterangan',
+  // Kolom khusus tab "LIST ALL ASET ..." — tidak dipakai tab weekly IN/OUT.
+  'jenis': 'jenis', 'merk': 'merk', 'type': 'tipe', 'tipe': 'tipe',
 };
 
 /** CSV → array of record. Menangani kutip ganda dan newline di dalam sel. */
@@ -193,29 +220,55 @@ export function parseCsv(text) {
 
 /** Baris CSV mentah → record ternormalisasi. Header dicari otomatis. */
 export function rowsToRecords(rows) {
-  const headIdx = rows.findIndex((r) => r.some((c) => ['nama barang', 'nama aset'].includes(norm(c))));
+  const headIdx = rows.findIndex((r) => r.some((c) => ['nama barang', 'nama aset', 'nama item'].includes(norm(c))));
   if (headIdx < 0) return [];
   const cols = rows[headIdx].map((c) => HEADER_MAP[norm(c)] || null);
 
-  return rows.slice(headIdx + 1).map((r) => {
+  // Sheet "LIST ALL ASET ..." punya baris judul sub-bab di antara item
+  // (mis. "Main Office", "MS WUNUT") — sel-sel lain di baris itu kosong
+  // karena merge cell. Baris seperti ini tidak dibuang, tapi dijadikan
+  // "sub-bab berjalan" yang ditempel ke item-item di bawahnya lewat
+  // detailAlokasi, supaya tampilannya bisa dikelompokkan sama seperti sheet.
+  let subBabBerjalan = '';
+  const out = [];
+
+  for (const r of rows.slice(headIdx + 1)) {
     const o = {};
     cols.forEach((key, i) => { if (key) o[key] = r[i] ?? ''; });
-    if (!String(o.namaBarang || '').trim()) return null;
 
-    const tanggal = parseTanggal(o.tanggal);
+    const namaBarangTrim = String(o.namaBarang || '').trim();
+    if (!namaBarangTrim) {
+      // Baris judul sub-bab (mis. "Main Office") berasal dari sel gabungan di
+      // Google Sheets — sel lain di baris itu kosong karena merge, jadi cuma
+      // ada SATU nilai unik yang terisi di seluruh baris.
+      const isiBaris = r.map((c) => String(c || '').trim()).filter(Boolean);
+      const unik = [...new Set(isiBaris)];
+      if (unik.length === 1 && !/^\d+$/.test(unik[0])) subBabBerjalan = unik[0];
+      continue;
+    }
+
+    const tanggalDariTahun = parseTanggal(o.tahun);
+    // Kolom "Tahun" di tab "LIST ALL ASET ..." sebenarnya berisi tanggal
+    // perolehan penuh (mis. "4 Maret 2026"), bukan angka tahun murni seperti
+    // di tab weekly IN/OUT. parseAngka() dulu memotong itu jadi angka acak
+    // ("4 Maret 2026" -> 42026). Kalau isinya berhasil dibaca sebagai tanggal,
+    // pakai itu; kalau tidak, baru dianggap angka tahun biasa.
+    const tanggal = parseTanggal(o.tanggal) || tanggalDariTahun;
     const harga = parseAngka(o.harga);
     const jumlah = parseAngka(o.jumlah);
     const rec = {
       tanggal,
       minggu: Math.round(parseAngka(o.minggu)) || 0,
       bulan: Math.round(parseAngka(o.bulan)) || (tanggal ? Number(tanggal.slice(5, 7)) : 0),
-      tahun: Math.round(parseAngka(o.tahun)) || (tanggal ? Number(tanggal.slice(0, 4)) : 0),
+      tahun: tanggalDariTahun
+        ? Number(tanggalDariTahun.slice(0, 4))
+        : Math.round(parseAngka(o.tahun)) || (tanggal ? Number(tanggal.slice(0, 4)) : 0),
       kode: String(o.kode || '').trim(),
-      namaBarang: String(o.namaBarang).trim(),
+      namaBarang: namaBarangTrim,
       jumlah,
       satuan: String(o.satuan || '').trim(),
       alokasi: String(o.alokasi || 'OTHERS').trim() || 'OTHERS',
-      detailAlokasi: String(o.detailAlokasi || '').trim(),
+      detailAlokasi: String(o.detailAlokasi || '').trim() || subBabBerjalan,
       pic: String(o.pic || '').trim(),
       rh: o.rh ? parseAngka(o.rh) : null,
       harga,
@@ -225,16 +278,117 @@ export function rowsToRecords(rows) {
       statusSmr: String(o.statusSmr || '').trim(),
       noShipment: String(o.noShipment || '').trim(),
       keterangan: String(o.keterangan || '').trim(),
+      jenis: String(o.jenis || '').trim(),
+      merk: String(o.merk || '').trim(),
+      tipe: String(o.tipe || '').trim(),
     };
     rec.section = classifySection(rec);
-    return rec;
-  }).filter(Boolean);
+    out.push(rec);
+  }
+  return out;
 }
 
 /** Kunci dedup — import ulang sheet yang sama tidak menggandakan baris. */
 const hashRow = (r) =>
   [r.tanggal, r.kode, r.namaBarang, r.jumlah, r.alokasi, r.noMr, r.totalHarga]
     .join('|').toLowerCase().replace(/\s+/g, ' ').slice(0, 300);
+
+// Menyamakan gaya penulisan ukuran inci yang sering beda antar-sheet, mis.
+// `8,7"` di sheet aset vs `8,7 Inci` di catatan pembelian — tanpa ini,
+// pencocokan by-name gagal walau barangnya persis sama.
+const normNama = (s) => String(s || '').toLowerCase().replace(/"/g, 'inci').replace(/[^a-z0-9]/g, '');
+
+// Fallback saat nama di dua sheet beda jauh redaksinya (mis. tambahan kode
+// SKU/reseller di ujung nama) tapi jelas barang yang sama — dicocokkan lewat
+// kemiripan kumpulan kata (Jaccard), bukan string persis.
+const tokenSet = (s) => new Set(String(s || '').toLowerCase().replace(/"/g, ' inci ').match(/[a-z0-9]+/g) || []);
+const angkaMurni = (set) => new Set([...set].filter((t) => /^\d+$/.test(t)));
+const jaccard = (a, b) => {
+  if (!a.size || !b.size) return 0;
+  // Angka murni (ukuran, kapasitas, model) adalah pembeda paling penting —
+  // "32 Inchi" vs "65 Inchi" kata-katanya mirip tapi jelas barang beda.
+  // Kalau kedua nama sama-sama punya angka murni tapi TIDAK ADA yang sama
+  // sekali, tolak langsung berapa pun tingginya kemiripan kata lain.
+  const angkaA = angkaMurni(a), angkaB = angkaMurni(b);
+  if (angkaA.size && angkaB.size && ![...angkaA].some((n) => angkaB.has(n))) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / (a.size + b.size - inter);
+};
+const AMBANG_FUZZY = 0.5; // di bawah ini dianggap barang beda, tidak dipasangkan
+
+/**
+ * Sheet "LIST ALL ASET ..." tidak punya kolom harga sama sekali. Sebagai
+ * pendekatan terbaik yang bisa diambil, cocokkan tiap aset ke catatan
+ * pembelian di tab "... IN" (RDA/RCE) berdasarkan nama barang yang sama DAN
+ * tanggal terdekat — karena satu nama barang bisa dibeli berkali-kali (mis.
+ * beberapa "Kursi Kantor" identik di minggu berbeda), setiap baris pembelian
+ * cuma boleh dipasangkan ke SATU aset (greedy nearest-date, sekali pakai).
+ * Hasilnya SELALU ditandai sebagai estimasi (hargaEstimasi), tidak pernah
+ * menimpa kolom totalHarga yang memang kosong untuk baris ASET.
+ *
+ * Dua tahap terpisah, BUKAN diselang-seling per aset:
+ *  1) Exact-match (nama ternormalisasi sama persis) untuk SEMUA aset dulu.
+ *  2) Fuzzy-match (kemiripan kata) untuk aset yang masih tersisa, dari sisa
+ *     katalog pembelian yang belum kepakai.
+ * Kalau digabung dalam satu putaran, aset yang diproses lebih dulu bisa
+ * "mencuri" via fuzzy kandidat pembelian yang sebetulnya exact-match milik
+ * aset lain yang belum diproses — itu pernah kejadian waktu diuji.
+ */
+async function attachEstimasiHarga(rowsHasil) {
+  const asetRows = rowsHasil.filter((r) => r.direction === 'ASET');
+  if (!asetRows.length) return;
+  const sites = [...new Set(asetRows.map((r) => r.site))];
+  const { rows: pembelian } = await query(
+    `SELECT site, tanggal, nama_barang, total_harga FROM weekly_report_rows
+      WHERE direction = 'IN' AND site = ANY($1::text[]) AND total_harga > 0`,
+    [sites]
+  );
+  const pool = {};
+  const semuaPembelian = [];
+  for (const p of pembelian) {
+    const k = {
+      site: p.site, namaBarang: p.nama_barang,
+      tanggal: p.tanggal ? new Date(p.tanggal).getTime() : null,
+      harga: Number(p.total_harga),
+      used: false,
+    };
+    (pool[`${p.site}|${normNama(p.nama_barang)}`] ||= []).push(k);
+    semuaPembelian.push(k);
+  }
+  // Urut berdasarkan tanggal supaya assignment deterministik & tidak
+  // tergantung urutan hasil query.
+  const asetUrut = [...asetRows].sort((a, b) => String(a.tanggal || '').localeCompare(String(b.tanggal || '')));
+  const belumKetemu = [];
+
+  // Tahap 1: exact-match untuk semua aset.
+  for (const a of asetUrut) {
+    const kandidat = pool[`${a.site}|${normNama(a.namaBarang)}`];
+    if (!kandidat || !kandidat.length) { belumKetemu.push(a); continue; }
+    const tglAset = a.tanggal ? new Date(a.tanggal).getTime() : null;
+    let terbaik = null, jarakTerbaik = Infinity;
+    for (const k of kandidat) {
+      if (k.used) continue;
+      const jarak = (tglAset != null && k.tanggal != null) ? Math.abs(tglAset - k.tanggal) : Number.MAX_SAFE_INTEGER;
+      if (jarak < jarakTerbaik) { jarakTerbaik = jarak; terbaik = k; }
+    }
+    if (terbaik) { terbaik.used = true; a.hargaEstimasi = terbaik.harga; }
+    else belumKetemu.push(a); // nama cocok tapi semua kandidatnya sudah kepakai aset lain
+  }
+
+  // Tahap 2: fuzzy-match, hanya untuk sisa aset yang tidak dapat exact-match,
+  // hanya dari sisa pembelian yang masih belum kepakai.
+  for (const a of belumKetemu) {
+    const tokenAset = tokenSet(a.namaBarang);
+    let terbaikFuzzy = null, skorTerbaik = AMBANG_FUZZY;
+    for (const k of semuaPembelian) {
+      if (k.used || k.site !== a.site) continue;
+      const skor = jaccard(tokenAset, tokenSet(k.namaBarang));
+      if (skor > skorTerbaik) { skorTerbaik = skor; terbaikFuzzy = k; }
+    }
+    if (terbaikFuzzy) { terbaikFuzzy.used = true; a.hargaEstimasi = terbaikFuzzy.harga; }
+  }
+}
 
 // ── Ambil sheet dari Google (server-side, tanpa CORS) ─────────────────────
 export function extractSheetId(input) {
@@ -257,34 +411,100 @@ const directionOf = (tab) => {
   return /\bin\b/i.test(tab) ? 'IN' : 'OUT';
 };
 
+// ── Pengaman: pastikan isi CSV yang diambil benar-benar tab yang dimaksud ──
+// Kasus nyata yang memicu ini: nama tab di Google Sheets punya spasi ganda
+// ("Report Weekly  MS Wunut RDA IN") sementara nama yang disimpan di
+// weekly_report_sources cuma satu spasi. Google gviz gagal cocokkan nama
+// persis itu dan diam-diam balikin isi sheet PERTAMA di file (RDA OUT) tanpa
+// error — akibatnya halaman "Barang Masuk" (IN) menampilkan data RDA OUT.
+// Kolom di bawah cuma ada di salah satu dari dua tab, jadi dipakai buat
+// mendeteksi isi CSV sebenarnya datang dari arah mana.
+const HEADER_HINTS = {
+  IN: ['supplier', 'no po', 'no pr'],          // cuma ada di tab "... RDA IN"
+  OUT: ['alokasi', 'pic', 'no shipment'],      // cuma ada di tab "... RDA OUT"
+};
+
+function detectDirectionFromHeaders(headerRow) {
+  const normed = (headerRow || []).map(norm);
+  const hasIn = HEADER_HINTS.IN.some((h) => normed.includes(h));
+  const hasOut = HEADER_HINTS.OUT.some((h) => normed.includes(h));
+  if (hasIn && !hasOut) return 'IN';
+  if (hasOut && !hasIn) return 'OUT';
+  return null; // ambigu (mis. tab "LIST ALL ASET ...") — tidak divalidasi
+}
+
+/** Lempar error kalau isi CSV ternyata bukan arah yang diharapkan dari nama tab. */
+function assertDirectionMatches(tab, rows) {
+  const expected = directionOf(tab);
+  if (expected === 'ASET') return; // sheet aset tidak punya pola IN/OUT
+  const headIdx = rows.findIndex((r) => r.some((c) => ['nama barang', 'nama aset', 'nama item'].includes(norm(c))));
+  if (headIdx < 0) return; // biar rowsToRecords yang menangani (hasilnya kosong)
+  const actual = detectDirectionFromHeaders(rows[headIdx]);
+  if (actual && actual !== expected) {
+    throw Object.assign(new Error(
+      `Tab "${tab}" dikonfigurasi sebagai arah ${expected}, tapi kolom yang terbaca cocok dengan tab ${actual} `
+      + `(kemungkinan nama tab di pengaturan sumber tidak persis sama dengan nama tab asli di Google Sheets — `
+      + `cek spasi/ejaan, lalu salin-tempel ulang nama tabnya). Sinkronisasi dibatalkan untuk mencegah data tersimpan di arah yang salah.`
+    ), { status: 400 });
+  }
+}
+
 // ── Repo ──────────────────────────────────────────────────────────────────
 export const WeeklyReports = {
   async upsertMany(site, tab, records, importedBy) {
     const direction = directionOf(tab);
     let inserted = 0, updated = 0;
+    const hashesInBatch = [];
     for (const r of records) {
       const hash = hashRow(r);
+      hashesInBatch.push(hash);
       const { rows } = await query(
         `INSERT INTO weekly_report_rows
            (id, site, direction, source_tab, row_hash, tanggal, minggu, bulan, tahun, kode,
             nama_barang, jumlah, satuan, alokasi, detail_alokasi, pic, rh, harga, total_harga,
-            no_mr, gen_bus, status_smr, no_shipment, keterangan, section, imported_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+            no_mr, gen_bus, status_smr, no_shipment, keterangan, jenis, merk, tipe, section, imported_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
          ON CONFLICT (site, direction, row_hash) DO UPDATE SET
-           source_tab=EXCLUDED.source_tab, minggu=EXCLUDED.minggu, bulan=EXCLUDED.bulan,
-           tahun=EXCLUDED.tahun, jumlah=EXCLUDED.jumlah, harga=EXCLUDED.harga,
-           total_harga=EXCLUDED.total_harga, status_smr=EXCLUDED.status_smr,
+           -- Refresh SEMUA kolom yang bisa berubah antar-sync, bukan sebagian.
+           -- Sebelumnya cuma sebagian kolom (mis. jenis/merk/tipe) yang
+           -- disebut di sini, jadi kolom lain (detail_alokasi/pic/rh/dll)
+           -- macet selamanya di nilai hasil sync PERTAMA — walau hasil parsing
+           -- di sync berikutnya sudah benar, karena baris yang row_hash-nya
+           -- sama kena UPDATE, bukan INSERT baru, dan kolom yg tidak disebut
+           -- di sini tidak pernah tersentuh lagi.
+           source_tab=EXCLUDED.source_tab, tanggal=EXCLUDED.tanggal,
+           minggu=EXCLUDED.minggu, bulan=EXCLUDED.bulan, tahun=EXCLUDED.tahun,
+           kode=EXCLUDED.kode, nama_barang=EXCLUDED.nama_barang,
+           jumlah=EXCLUDED.jumlah, satuan=EXCLUDED.satuan, alokasi=EXCLUDED.alokasi,
+           detail_alokasi=EXCLUDED.detail_alokasi, pic=EXCLUDED.pic, rh=EXCLUDED.rh,
+           harga=EXCLUDED.harga, total_harga=EXCLUDED.total_harga,
+           no_mr=EXCLUDED.no_mr, gen_bus=EXCLUDED.gen_bus, status_smr=EXCLUDED.status_smr,
            no_shipment=EXCLUDED.no_shipment, keterangan=EXCLUDED.keterangan,
+           jenis=EXCLUDED.jenis, merk=EXCLUDED.merk, tipe=EXCLUDED.tipe,
            section=EXCLUDED.section, imported_at=NOW(), imported_by=EXCLUDED.imported_by
          RETURNING (xmax = 0) AS is_new`,
         [`wr-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, site, direction, tab, hash,
          r.tanggal, r.minggu, r.bulan, r.tahun, r.kode, r.namaBarang, r.jumlah, r.satuan, r.alokasi,
          r.detailAlokasi, r.pic, r.rh, r.harga, r.totalHarga, r.noMr, r.genBus, r.statusSmr,
-         r.noShipment, r.keterangan, r.section, importedBy]
+         r.noShipment, r.keterangan, r.jenis, r.merk, r.tipe, r.section, importedBy]
       );
       rows[0].is_new ? inserted++ : updated++;
     }
-    return { inserted, updated, total: records.length };
+    // Baris yang tabnya sama (site+direction+source_tab) tapi hash-nya tidak
+    // ada di batch saat ini berarti sudah tidak relevan lagi → dihapus.
+    // Dijaga supaya tidak jalan kalau batch kosong (mis. fetch gagal/tab
+    // kosong sementara) — kalau tidak, semua baris lama malah ikut terhapus.
+    let removed = 0;
+    if (hashesInBatch.length > 0) {
+      const res = await query(
+        `DELETE FROM weekly_report_rows
+          WHERE site = $1 AND direction = $2 AND source_tab = $3
+            AND NOT (row_hash = ANY($4::text[]))`,
+        [site, direction, tab, hashesInBatch]
+      );
+      removed = res.rowCount;
+    }
+    return { inserted, updated, removed, total: records.length };
   },
 
   async list({ site, tahun, bulan, direction }) {
@@ -297,7 +517,7 @@ export const WeeklyReports = {
     const { rows } = await query(
       `SELECT * FROM weekly_report_rows WHERE ${where.join(' AND ')}
         ORDER BY tahun, bulan, minggu, tanggal NULLS LAST, nama_barang`, params);
-    return rows.map((r) => ({
+    const hasil = rows.map((r) => ({
       id: r.id, site: r.site, direction: r.direction, sourceTab: r.source_tab,
       tanggal: r.tanggal ? new Date(r.tanggal).toISOString().slice(0, 10) : null,
       minggu: r.minggu, bulan: r.bulan, tahun: r.tahun, kode: r.kode,
@@ -306,8 +526,11 @@ export const WeeklyReports = {
       rh: r.rh === null ? null : Number(r.rh), harga: Number(r.harga),
       totalHarga: Number(r.total_harga), noMr: r.no_mr, genBus: r.gen_bus,
       statusSmr: r.status_smr, noShipment: r.no_shipment, keterangan: r.keterangan,
+      jenis: r.jenis, merk: r.merk, tipe: r.tipe,
       section: r.section, importedAt: r.imported_at, importedBy: r.imported_by,
     }));
+    await attachEstimasiHarga(hasil);
+    return hasil;
   },
 
   async source(site) {
@@ -391,7 +614,9 @@ export function weeklyReportRouter() {
     for (const tab of src.tabs) {
       try {
         const csv = await fetchTabCsv(src.sheetId, tab);
-        const records = rowsToRecords(parseCsv(csv));
+        const parsed = parseCsv(csv);
+        assertDirectionMatches(tab, parsed);
+        const records = rowsToRecords(parsed);
         const stat = await WeeklyReports.upsertMany(site, tab, records, req.auth.email);
         hasil.push({ tab, ...stat });
       } catch (err) {
@@ -442,7 +667,9 @@ export function startAutoSync(intervalMs = 5 * 60 * 1000) {
       for (const s of rows) {
         for (const tab of (s.tabs || '').split('|').filter(Boolean)) {
           try {
-            const records = rowsToRecords(parseCsv(await fetchTabCsv(s.sheet_id, tab)));
+            const parsed = parseCsv(await fetchTabCsv(s.sheet_id, tab));
+            assertDirectionMatches(tab, parsed);
+            const records = rowsToRecords(parsed);
             await WeeklyReports.upsertMany(s.site, tab, records, 'auto-sync');
           } catch (err) { console.warn(`[weekly-sync] ${s.site}/${tab}:`, err.message); }
         }
