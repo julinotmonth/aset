@@ -51,20 +51,46 @@ const LABEL_SEKSI: Record<Section, string> = {
   MAINT: 'Part Maintenance', OH: 'Overhold', OLI: 'Consumption OLI', LAIN: 'Lain-Lain',
 };
 
-// Urutan baris tetap agar laporan tetap sebanding antar bulan, meski suatu
-// alokasi belum terpakai. Alokasi di luar daftar ini tetap muncul di bawah.
-const BARIS_TETAP: Record<Section, string[]> = {
-  MAINT: ['Compressor Ariel 1', 'Compressor Ariel 2', 'Compressor Ariel 3',
-    'Gas Engine Caterpillar 1', 'Gas Engine Caterpillar 2', 'Gas Engine Caterpillar 3',
-    'Air Compressor', 'Dispenser Filling Post', 'Dryer Xebec', 'Control Panel',
-    'Genset', 'OTHER', 'Metering'],
-  OH: ['Compressor Ariel 1', 'Compressor Ariel 2', 'Compressor Ariel 3',
-    'Gas Engine Caterpillar 1', 'Gas Engine Caterpillar 2', 'Gas Engine Caterpillar 3', 'Dryer'],
-  OLI: ['Compressor Ariel 1', 'Compressor Ariel 2', 'Compressor Ariel 3',
-    'Gas Engine Caterpillar 1', 'Gas Engine Caterpillar 2', 'Gas Engine Caterpillar 3', 'Dryer'],
+// Kategori generik yang wajar ada di semua site (bukan model mesin
+// spesifik), jadi tetap ditampilkan sebagai baris meski belum terpakai
+// bulan ini — supaya format laporan tetap sebanding antar bulan.
+//
+// SENGAJA TIDAK memuat nama unit Compressor/Gas Engine tertentu (dulu di
+// sini ada "Compressor Ariel 1-3"/"Gas Engine Caterpillar 1-3" — itu
+// peralatan MS Wunut). Tiap site punya armada beda (MS Setu misalnya pakai
+// Compressor Ariel 1-2 + Enric, dan Gas Engine Doosan, bukan Caterpillar),
+// jadi baris compressor/gas-engine sekarang murni ikut apa yang benar-benar
+// ada di data site tersebut (lihat urutkanBarisSeksi di bawah) — otomatis
+// benar untuk site manapun tanpa perlu di-hardcode manual per site.
+const BARIS_UNIVERSAL: Record<Section, string[]> = {
+  MAINT: ['Air Compressor', 'Dispenser Filling Post', 'Dryer Xebec', 'Control Panel', 'Genset', 'OTHER', 'Metering'],
+  OH: ['Dryer'],
+  OLI: ['Dryer'],
   LAIN: ['Jasa Service & Repair', 'Jasa New Instalasi', 'Jasa Kalibrasi', 'Sedot Limbah B3',
     'Jasa Analisa GAS', 'Jasa Analisa OLI', 'OTHERS'],
 };
+
+/**
+ * Susun ulang baris sebuah seksi: semua "Compressor ..." dulu (diurutkan
+ * alami, jadi "Ariel 1" sebelum "Ariel 2"/"Enric"), lalu semua
+ * "Gas Engine ...", baru kategori universal (urutan tetap sesuai
+ * BARIS_UNIVERSAL), dan sisanya (alokasi lain yang tak terduga) di paling
+ * bawah — supaya nama mesin apapun yang muncul di data (site manapun)
+ * otomatis rapi tanpa perlu daftar hardcode per site.
+ */
+function urutkanBarisSeksi(seksi: Section, keys: string[]): string[] {
+  const cmp = (a: string, b: string) => a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' });
+  // Diawali kata Compressor/Gas Engine, BUKAN cuma "mengandung" — supaya
+  // kategori generik seperti "Air Compressor" (bukan unit compressor
+  // bernomor, cuma nama kategori) tidak ikut tersedot ke bucket ini.
+  const compressor = keys.filter((k) => /^compressor\b/i.test(k)).sort(cmp);
+  const gasEngine = keys.filter((k) => /^gas engine\b/i.test(k)).sort(cmp);
+  const sudahDipakai = new Set([...compressor, ...gasEngine]);
+  const universal = BARIS_UNIVERSAL[seksi].filter((k) => keys.includes(k) && !sudahDipakai.has(k));
+  universal.forEach((k) => sudahDipakai.add(k));
+  const lainnya = keys.filter((k) => !sudahDipakai.has(k)).sort(cmp);
+  return [...compressor, ...gasEngine, ...universal, ...lainnya];
+}
 
 const NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -73,6 +99,31 @@ const PALET = ['#00D084', '#60A5FA', '#FBBF24', '#C084FC', '#F472B6', '#38BDF8',
 
 const rupiah = (n: number) => (n === 0 ? '-' : `Rp ${Math.round(n).toLocaleString('id-ID')}`);
 const rupiahPenuh = (n: number) => `Rp ${Math.round(n).toLocaleString('id-ID')}`;
+
+// Sebagian besar site berlabel polos ("Wunut", "Setu") jadi ditampilkan
+// pakai prefix "MS" biar konsisten dengan sebutan sehari-hari ("MS Wunut").
+// Tapi tidak semua site adalah Mother Station — mis. WS Dawuan — yang
+// labelnya sudah menyertakan prefix sendiri. Jangan dobel jadi "MS WS
+// Dawuan": kalau label sudah diawali "MS"/"WS", pakai apa adanya.
+const labelPenuh = (label: string) => (/^\s*(ms|ws)\b/i.test(label) ? label : `MS ${label}`);
+
+// Sebagian site (WS Dawuan/"indramayu") itu bengkel armada kendaraan, bukan
+// fasilitas dengan mesin tetap — kolom Alokasi-nya diisi PLAT KENDARAAN yang
+// jumlahnya puluhan dan berubah tiap minggu (truk baru masuk servis, dst),
+// beda dari Wunut/Setu/Blora yang Alokasi-nya nama mesin tetap (jumlahnya
+// kecil & stabil). Kalau tetap dipivot per Alokasi, tabelnya jadi sangat
+// panjang dan kurang berguna untuk dibaca manajemen. Untuk site semacam ini,
+// dipivot per "Detail Alokasi" (jenis kegiatan: Service berkala, Overhaul,
+// dll) yang jumlahnya jauh lebih sedikit dan lebih bermakna dibaca.
+const SITE_KELOMPOK_KEGIATAN = new Set<string>(['indramayu']);
+
+/** Kunci baris pivot untuk satu baris data: Alokasi (default) atau Detail
+ * Alokasi (site di SITE_KELOMPOK_KEGIATAN). Detail Alokasi kosong ditandai
+ * eksplisit alih-alih dibiarkan jadi baris tanpa label. */
+function kunciBarisPivot(r: WeeklyRow): string {
+  if (!SITE_KELOMPOK_KEGIATAN.has(r.site)) return r.alokasi;
+  return r.detailAlokasi.trim() || '(Tanpa Detail Alokasi)';
+}
 /** Formatter tooltip recharts — nilainya bertipe longgar, jadi dinormalkan dulu. */
 const fmtTooltip = (v: unknown) => rupiahPenuh(Number(v) || 0);
 
@@ -84,8 +135,28 @@ const ringkas = (n: number) => {
   return String(Math.round(n));
 };
 
+// Pra-isi nama tab di panel "Sumber Sheet" saat site belum pernah
+// dikonfigurasi. Ini cuma tebakan awal yang bisa diedit admin — bukan
+// aturan wajib — tapi disesuaikan per site kalau polanya sudah diketahui
+// beda, supaya admin tidak perlu ketik ulang dari nol.
 const TAB_DEFAULT = (site: string) => {
   const s = site.toUpperCase();
+  if (site === 'setu') {
+    // MS Setu menamai tab pakai Bahasa Indonesia ("Barang Masuk/Keluar"),
+    // bukan pola "... RDA IN/OUT" seperti Wunut.
+    return [`Barang Keluar - RDA SETU`, `Barang Masuk - RDA SETU`,
+      `Barang Masuk - RCE SETU`, `Barang Keluar - RCE SETU`];
+  }
+  if (site === 'blora') {
+    // MS Blora tidak memisah RDA/RCE — cuma dua tab polos "out" dan "in".
+    return ['out', 'in'];
+  }
+  if (site === 'kht') {
+    // MS KHT punya 4 tab: RDA (In, Out) + RCE (In (1), Out (1)) — bukan
+    // cuma 2 seperti dugaan awal. Cek ulang ke admin kalau urutan/nama
+    // "(1)"-nya berubah di sheet aslinya.
+    return ['Out', 'In', 'Out (1)', 'In (1)'];
+  }
   return [`Report Weekly MS ${s} RDA OUT`, `Report Weekly MS ${s} RDA IN`,
     `Report Weekly MS ${s} RCE IN`, `Report Weekly MS ${s} RCE OUT`,
     `LIST ALL ASET MS ${s}`];
@@ -153,7 +224,6 @@ export function WeeklyReportView({ auth }: Props) {
 
   const siteTerkunci = !isSuperAdmin && auth.assignedSite !== 'global';
   const labelSite = sites.find((s) => s.key === site)?.label ?? site;
-
   const muatData = useCallback(async (diam = false) => {
     if (!diam) setMemuat(true);
     try {
@@ -191,15 +261,18 @@ export function WeeklyReportView({ auth }: Props) {
   }, [muatData]);
 
   // ── Pivot biaya (mode BARANG KELUAR) ────────────────────────────────────
-  const { mingguList, pivot, totalSeksi, grandTotal } = useMemo(() => {
+  const { mingguList, pivot, totalSeksi, grandTotal, kelompokKegiatan } = useMemo(() => {
     const mingguSet = new Set<number>();
     rows.forEach((r) => { if (r.minggu > 0) mingguSet.add(r.minggu); });
     const minggus = [...mingguSet].sort((a, b) => a - b);
 
+    const kelompokKegiatan = rows.length > 0 && SITE_KELOMPOK_KEGIATAN.has(rows[0].site);
     const p: Record<Section, Record<string, Record<number, number>>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {} };
-    for (const s of SECTIONS) for (const a of BARIS_TETAP[s.key]) p[s.key][a] = {};
+    if (!kelompokKegiatan) {
+      for (const s of SECTIONS) for (const a of BARIS_UNIVERSAL[s.key]) p[s.key][a] = {};
+    }
     for (const r of rows) {
-      const bucket = (p[r.section][r.alokasi] ??= {});
+      const bucket = (p[r.section][kunciBarisPivot(r)] ??= {});
       bucket[r.minggu] = (bucket[r.minggu] ?? 0) + r.totalHarga;
     }
 
@@ -213,7 +286,7 @@ export function WeeklyReportView({ auth }: Props) {
         }
       }
     }
-    return { mingguList: minggus, pivot: p, totalSeksi: ts, grandTotal: gt };
+    return { mingguList: minggus, pivot: p, totalSeksi: ts, grandTotal: gt, kelompokKegiatan };
   }, [rows]);
 
   const totalKeseluruhan = useMemo(
@@ -418,7 +491,8 @@ export function WeeklyReportView({ auth }: Props) {
     if (arah === 'OUT') {
       baris.push(['Seksi', 'Alokasi', ...mingguList.map((m) => `Minggu ${m}`), 'Total']);
       for (const s of SECTIONS) {
-        for (const [alokasi, data] of Object.entries(pivot[s.key])) {
+        for (const alokasi of urutkanBarisSeksi(s.key, Object.keys(pivot[s.key]))) {
+          const data = pivot[s.key][alokasi];
           baris.push([s.judul, alokasi, ...mingguList.map((m) => String(data[m] ?? 0)),
             String(Object.values(data).reduce((a, b) => a + b, 0))]);
         }
@@ -487,7 +561,7 @@ export function WeeklyReportView({ auth }: Props) {
       {/* Filter + aksi */}
       <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center' }}>
         <select value={site} onChange={(e) => setSite(e.target.value)} disabled={siteTerkunci} style={kontrol}>
-          {sites.map((s) => <option key={s.key} value={s.key}>MS {s.label}</option>)}
+          {sites.map((s) => <option key={s.key} value={s.key}>{labelPenuh(s.label)}</option>)}
         </select>
 
         {arah !== 'ASET' && (
@@ -529,7 +603,7 @@ export function WeeklyReportView({ auth }: Props) {
       {panelSumberTerbuka && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '1.1rem 1.25rem', marginBottom: '1rem', display: 'grid', gap: '.75rem' }}>
           <label style={{ fontSize: '.78rem', color: 'var(--txt-muted)' }}>
-            URL Google Spreadsheet untuk MS {labelSite}
+            URL Google Spreadsheet untuk {labelPenuh(labelSite)}
             <input value={urlSheet} onChange={(e) => setUrlSheet(e.target.value)}
               placeholder="https://docs.google.com/spreadsheets/d/..."
               style={{ ...kontrol, display: 'block', width: '100%', marginTop: '.35rem' }} />
@@ -569,7 +643,7 @@ export function WeeklyReportView({ auth }: Props) {
 
       {kosong && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem', textAlign: 'center', color: 'var(--txt-muted)' }}>
-          Belum ada data {arah === 'OUT' ? 'barang keluar' : arah === 'IN' ? 'barang masuk' : 'aset'} untuk MS {labelSite} pada periode ini.
+          Belum ada data {arah === 'OUT' ? 'barang keluar' : arah === 'IN' ? 'barang masuk' : 'aset'} untuk {labelPenuh(labelSite)} pada periode ini.
           Atur sumber spreadsheet lalu klik “Sync Sekarang”, atau import file CSV.
         </div>
       )}
@@ -627,11 +701,13 @@ export function WeeklyReportView({ auth }: Props) {
                       </td>
                     </tr>
                     <tr style={{ background: 'rgba(255,255,255,.04)' }}>
-                      <th style={{ padding: '.4rem .6rem', textAlign: 'left', fontSize: '.7rem', minWidth: 190 }}>{LABEL_SEKSI[s.key]}</th>
+                      <th style={{ padding: '.4rem .6rem', textAlign: 'left', fontSize: '.7rem', minWidth: 190 }}>
+                        {LABEL_SEKSI[s.key]}{kelompokKegiatan ? ' (per Kegiatan)' : ''}
+                      </th>
                       <th style={{ ...thMinggu, fontWeight: 700 }}>Total</th>
                       {mingguList.map((m) => <th key={m} style={thMinggu}>W{m}</th>)}
                     </tr>
-                    {Object.keys(pivot[s.key]).map((alokasi) => {
+                    {urutkanBarisSeksi(s.key, Object.keys(pivot[s.key])).map((alokasi) => {
                       const data = pivot[s.key][alokasi];
                       const total = Object.values(data).reduce((a, b) => a + b, 0);
                       return (
@@ -679,7 +755,7 @@ export function WeeklyReportView({ auth }: Props) {
 
           {/* Blok "NB :" seperti pada template Excel */}
           <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginTop: '1rem', fontSize: '.78rem', color: 'var(--txt-muted)', lineHeight: 1.7 }}>
-            <strong style={{ color: 'var(--txt-primary)' }}>NB:</strong> Total penggunaan Part Maintenance MS {labelSite.toUpperCase()}
+            <strong style={{ color: 'var(--txt-primary)' }}>NB:</strong> Total penggunaan Part Maintenance {labelPenuh(labelSite).toUpperCase()}
             {bulan ? ` ${NAMA_BULAN[bulan - 1]}` : ` ${tahun}`} sebesar <strong style={{ color: '#00D084' }}>{rupiahPenuh(totalPerSeksi.MAINT)}</strong>;
             biaya Overhold <strong style={{ color: '#60A5FA' }}>{rupiahPenuh(totalPerSeksi.OH)}</strong>;
             pemakaian OLI <strong style={{ color: '#FBBF24' }}>{rupiahPenuh(totalPerSeksi.OLI)}</strong>;
@@ -694,7 +770,7 @@ export function WeeklyReportView({ auth }: Props) {
         <>
           <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             <KartuKpi ikon={TrendingUp} warna="#00D084" label="Nilai Penerimaan" nilai={rupiahPenuh(masuk.nilai)}
-              sub={`MS ${labelSite}${bulan ? ` · ${NAMA_BULAN[bulan - 1]}` : ''} ${tahun}`} />
+              sub={`${labelPenuh(labelSite)}${bulan ? ` · ${NAMA_BULAN[bulan - 1]}` : ''} ${tahun}`} />
             <KartuKpi ikon={Boxes} warna="#60A5FA" label="Total Kuantitas" nilai={masuk.qty.toLocaleString('id-ID')}
               sub="gabungan semua satuan" />
             <KartuKpi ikon={Package} warna="#FBBF24" label="Baris Penerimaan" nilai={String(masuk.baris)}
@@ -787,7 +863,7 @@ export function WeeklyReportView({ auth }: Props) {
 
 
           <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginTop: '1rem', fontSize: '.78rem', color: 'var(--txt-muted)', lineHeight: 1.7 }}>
-            <strong style={{ color: 'var(--txt-primary)' }}>NB:</strong> MS {labelSite.toUpperCase()} menerima{' '}
+            <strong style={{ color: 'var(--txt-primary)' }}>NB:</strong> {labelPenuh(labelSite).toUpperCase()} menerima{' '}
             <strong style={{ color: '#00D084' }}>{masuk.baris}</strong> baris barang masuk senilai{' '}
             <strong style={{ color: '#00D084' }}>{rupiahPenuh(masuk.nilai)}</strong>
             {bulan ? ` pada ${NAMA_BULAN[bulan - 1]} ${tahun}` : ` sepanjang ${tahun}`}, tersebar di {mingguList.length} minggu.
@@ -801,7 +877,7 @@ export function WeeklyReportView({ auth }: Props) {
         <>
           <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             <KartuKpi ikon={Package} warna="#60A5FA" label="Total Aset" nilai={aset.baris.toLocaleString('id-ID')}
-              sub={`MS ${labelSite}`} />
+              sub={labelPenuh(labelSite)} />
             <KartuKpi ikon={Boxes} warna="#00D084" label="Total Kuantitas" nilai={aset.qty.toLocaleString('id-ID')}
               sub="gabungan semua satuan" />
             <KartuKpi ikon={TrendingUp} warna="#FBBF24" label="Nilai Total Aset" nilai={rupiahPenuh(aset.nilai + aset.nilaiEstimasi)}
@@ -838,7 +914,7 @@ export function WeeklyReportView({ auth }: Props) {
 
           <div className="glass-panel" style={{ borderRadius: 16, overflow: 'hidden' }}>
             <div style={{ padding: '.85rem 1rem', display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
-              <div style={{ fontWeight: 700, fontSize: '.82rem', color: '#60A5FA' }}>Semua Aset MS {labelSite}</div>
+              <div style={{ fontWeight: 700, fontSize: '.82rem', color: '#60A5FA' }}>Semua Aset {labelPenuh(labelSite)}</div>
               <div style={{ flex: 1 }} />
               <input value={cariAset} onChange={(e) => setCariAset(e.target.value)}
                 placeholder="Cari kode / nama / lokasi…"
@@ -909,14 +985,14 @@ export function WeeklyReportView({ auth }: Props) {
           </div>
 
           <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginTop: '1rem', fontSize: '.78rem', color: 'var(--txt-muted)', lineHeight: 1.7 }}>
-            <strong style={{ color: 'var(--txt-primary)' }}>NB:</strong> MS {labelSite.toUpperCase()} memiliki{' '}
+            <strong style={{ color: 'var(--txt-primary)' }}>NB:</strong> {labelPenuh(labelSite).toUpperCase()} memiliki{' '}
             <strong style={{ color: '#60A5FA' }}>{aset.baris}</strong> baris aset terdaftar di{' '}
             <strong style={{ color: '#60A5FA' }}>{aset.lokasiUnik}</strong> lokasi
             {aset.nilai > 0 && <> , dengan nilai tercatat <strong style={{ color: '#60A5FA' }}>{rupiahPenuh(aset.nilai)}</strong></>}
             {aset.nilaiEstimasi > 0 && <> {aset.nilai > 0 ? 'ditambah' : 'dengan'} estimasi <strong style={{ color: '#FBBF24' }}>{rupiahPenuh(aset.nilaiEstimasi)}</strong> lagi (kolom bertanda “≈”) dari harga pembelian di Barang Masuk yang nama & tanggalnya paling cocok</>}
             . Kolom Kategori/Merk/Type/Tahun
             diambil langsung dari kolom "Jenis"/"Merk"/"Type"/"Tahun" di sheet — kosong (“-”) berarti sel itu memang
-            kosong di spreadsheet. Daftar ini diambil dari tab “LIST ALL ASET MS {labelSite.toUpperCase()}” pada
+            kosong di spreadsheet. Daftar ini diambil dari tab “LIST ALL ASET {labelPenuh(labelSite).toUpperCase()}” pada
             Google Spreadsheet site — atur di panel Sumber Sheet kalau nama tabnya berbeda.
           </div>
         </>
