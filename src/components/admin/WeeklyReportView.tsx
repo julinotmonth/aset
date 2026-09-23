@@ -11,7 +11,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'rea
 import type { CSSProperties } from 'react';
 import {
   RefreshCw, Upload, Link2, Download, AlertTriangle, CheckCircle2, Loader2,
-  TrendingDown, TrendingUp, Package, Boxes,
+  TrendingDown, TrendingUp, Package, Boxes, ClipboardList,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -20,6 +20,7 @@ import {
 import type { AuthState } from '../../types';
 import { api } from '../../lib/api';
 import { getSites } from '../../data/siteStore';
+import { PicaView } from './PicaView';
 
 // ── Tipe ──────────────────────────────────────────────────────────────────
 type Section = 'MAINT' | 'OH' | 'OLI' | 'LAIN';
@@ -157,6 +158,11 @@ const TAB_DEFAULT = (site: string) => {
     // "(1)"-nya berubah di sheet aslinya.
     return ['Out', 'In', 'Out (1)', 'In (1)'];
   }
+  if (site === 'indramayu') {
+    // WS Dawuan (key tetap "indramayu") juga cuma dua tab polos "Out"/"In",
+    // sama seperti MS Blora — bukan pola "Report Weekly MS ... RDA OUT".
+    return ['Out', 'In'];
+  }
   return [`Report Weekly MS ${s} RDA OUT`, `Report Weekly MS ${s} RDA IN`,
     `Report Weekly MS ${s} RCE IN`, `Report Weekly MS ${s} RCE OUT`,
     `LIST ALL ASET MS ${s}`];
@@ -210,6 +216,7 @@ export function WeeklyReportView({ auth }: Props) {
   const [tahun, setTahun] = useState(new Date().getFullYear());
   const [bulan, setBulan] = useState<number | 0>(0);
   const [arah, setArah] = useState<'IN' | 'OUT' | 'ASET'>('OUT');
+  const [picaAktif, setPicaAktif] = useState(false);
 
   const [rows, setRows] = useState<WeeklyRow[]>([]);
   const [volumes, setVolumes] = useState<Record<number, number>>({});
@@ -540,11 +547,13 @@ export function WeeklyReportView({ auth }: Props) {
           { id: 'OUT', label: 'Barang Keluar', ikon: TrendingDown, warna: '#F87171' },
           { id: 'IN', label: 'Barang Masuk', ikon: TrendingUp, warna: '#00D084' },
           { id: 'ASET', label: 'Daftar Aset', ikon: Boxes, warna: '#60A5FA' },
+          { id: 'PICA', label: 'PICA', ikon: ClipboardList, warna: '#FBBF24' },
         ] as const).map((t) => {
-          const aktif = arah === t.id;
+          const aktif = t.id === 'PICA' ? picaAktif : (!picaAktif && arah === t.id);
           const Ikon = t.ikon;
           return (
-            <button key={t.id} type="button" onClick={() => setArah(t.id)}
+            <button key={t.id} type="button"
+              onClick={() => { if (t.id === 'PICA') setPicaAktif(true); else { setPicaAktif(false); setArah(t.id); } }}
               style={{
                 display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.55rem 1.1rem',
                 borderRadius: 12, cursor: 'pointer', fontWeight: 600, fontSize: '.82rem',
@@ -558,6 +567,14 @@ export function WeeklyReportView({ auth }: Props) {
         })}
       </div>
 
+      {/* Mode PICA (Problem/Identification/Corrective Action) punya bentuk data
+          & panel sumber yang sama sekali beda dari Barang Masuk/Keluar/Aset —
+          komponen sendiri, cuma berbagi header halaman & pemilih site. */}
+      {picaAktif ? (
+        <PicaView site={site} labelSite={labelPenuh(labelSite)} sites={sites}
+          onSiteChange={(s) => setSite(s)} siteTerkunci={siteTerkunci} />
+      ) : (
+      <>
       {/* Filter + aksi */}
       <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center' }}>
         <select value={site} onChange={(e) => setSite(e.target.value)} disabled={siteTerkunci} style={kontrol}>
@@ -996,6 +1013,8 @@ export function WeeklyReportView({ auth }: Props) {
             Google Spreadsheet site — atur di panel Sumber Sheet kalau nama tabnya berbeda.
           </div>
         </>
+      )}
+      </>
       )}
     </>
 
