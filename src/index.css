@@ -257,6 +257,25 @@ h3 { letter-spacing: -0.01em; }
   border-radius: var(--r-sm);
 }
 
+/* ── Native <select> dropdown popup ──────────────────────────────────────
+   `color-scheme` di :root/html (atas) sudah cukup di kebanyakan browser
+   modern untuk membuat popup opsi ikut gelap. Tapi beberapa versi
+   Chrome/Edge/Safari yang lebih lama tidak selalu konsisten menerapkannya
+   ke daftar opsi yang terbuka — jadi warna latar/tulisan tiap <option> juga
+   diset eksplisit di sini sebagai jaring pengaman, supaya popup-nya tetap
+   gelap dan mudah dibaca di manapun `color-scheme: dark` saja tidak cukup. */
+select {
+  color-scheme: inherit;
+}
+select option {
+  background: var(--bg-card, #10182b);
+  color: var(--txt-primary, #F5F7FA);
+}
+select option:checked,
+select option:hover {
+  background: var(--ce-green-subtle, rgba(0, 208, 132, 0.1));
+}
+
 /* ── Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-root); }
