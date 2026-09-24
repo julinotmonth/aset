@@ -4,6 +4,14 @@
    REETHAU CLEAN ENERGY — Design System Tokens
    ═══════════════════════════════════════════════════════════ */
 :root {
+  /* Browser merender chrome kontrol native (dropdown <select>, date/time
+     picker, scrollbar) berdasarkan color-scheme, BUKAN dari variabel warna
+     kustom di bawah — tanpa ini, popup dropdown tetap putih terang walau
+     seluruh halaman sudah bertema gelap. Mode terang sudah benar diset di
+     blok html[data-theme='light'] di bawah; :root ini adalah default gelap
+     jadi wajib diset eksplisit juga. */
+  color-scheme: dark;
+
   /* ── Brand Primary */
   --ce-green: #00D084;
   --ce-green-hover: #00B874;

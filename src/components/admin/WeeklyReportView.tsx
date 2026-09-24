@@ -508,7 +508,7 @@ export function WeeklyReportView({ auth }: Props) {
       }
       baris.push(['', 'Grand Total Price', ...mingguList.map((m) => String(grandTotal[m] ?? 0)), String(totalKeseluruhan)]);
     } else {
-      baris.push(['Tanggal', 'Minggu', 'Kode', 'Nama Barang', 'Jumlah', 'Satuan', 'Alokasi', 'Harga', 'Total Harga', 'No MR', 'Ket']);
+      baris.push(['Tanggal', 'Minggu', 'Kode', 'Nama Barang', 'Jumlah', 'Satuan', arah === 'IN' ? 'Supplier' : 'Alokasi', 'Harga', 'Total Harga', 'No MR', 'Ket']);
       for (const r of rows) {
         baris.push([r.tanggal ?? '', String(r.minggu), r.kode, r.namaBarang, String(r.jumlah), r.satuan,
           r.alokasi, String(r.harga), String(r.totalHarga), r.noMr, r.keterangan]);
@@ -809,7 +809,7 @@ export function WeeklyReportView({ auth }: Props) {
               </ResponsiveContainer>
             </PanelGrafik>
 
-            <PanelGrafik judul="Penerimaan per Alokasi / Tujuan">
+            <PanelGrafik judul="Penerimaan per Supplier">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={masuk.pie} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2}>
@@ -846,7 +846,7 @@ export function WeeklyReportView({ auth }: Props) {
                     {([
                       ['tanggal', 'Tanggal', 'left'], ['minggu', 'Minggu', 'left'],
                       ['kode', 'Kode', 'left'], ['namaBarang', 'Nama Barang', 'left'],
-                      ['alokasi', 'Alokasi', 'left'],
+                      ['alokasi', 'Supplier', 'left'],
                       ['jumlah', 'Jumlah', 'right'], ['totalHarga', 'Total Harga', 'right'],
                     ] as [KolomMasuk, string, 'left' | 'right'][]).map(([kolom, label, align]) => (
                       <th key={kolom} onClick={() => gantiSort(kolom)}
