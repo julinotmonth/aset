@@ -23,7 +23,7 @@ import { getSites } from '../../data/siteStore';
 import { PicaView } from './PicaView';
 
 // ── Tipe ──────────────────────────────────────────────────────────────────
-type Section = 'MAINT' | 'OH' | 'OLI' | 'LAIN';
+type Section = 'MAINT' | 'OH' | 'OLI' | 'LAIN' | 'ISOTANK';
 
 interface WeeklyRow {
   id: string; site: string; direction: 'IN' | 'OUT' | 'ASET'; sourceTab: string;
@@ -46,10 +46,14 @@ const SECTIONS: { key: Section; judul: string; totalLabel: string; warna: string
   { key: 'OH', judul: 'Penggunaan Part OH Per-Week', totalLabel: 'Total Harga OH', warna: '#60A5FA' },
   { key: 'OLI', judul: 'Consumption OLI Per-Week', totalLabel: 'Total Harga Comp OLI', warna: '#FBBF24' },
   { key: 'LAIN', judul: 'Lain-Lain Per-Week', totalLabel: 'Total Harga Lain-Lain', warna: '#C084FC' },
+  // Khusus site yang mengelola kontainer ISO Tank (LNG Sangkulirang) — site
+  // CNG lain (Wunut/Setu/Blora/KHT) tidak akan pernah mengisi seksi ini
+  // karena classifySection() cuma mendeteksinya lewat pola kode kontainer.
+  { key: 'ISOTANK', judul: 'ISO Tank Per-Week', totalLabel: 'Total Harga ISO Tank', warna: '#22D3EE' },
 ];
 
 const LABEL_SEKSI: Record<Section, string> = {
-  MAINT: 'Part Maintenance', OH: 'Overhold', OLI: 'Consumption OLI', LAIN: 'Lain-Lain',
+  MAINT: 'Part Maintenance', OH: 'Overhold', OLI: 'Consumption OLI', LAIN: 'Lain-Lain', ISOTANK: 'ISO Tank',
 };
 
 // Kategori generik yang wajar ada di semua site (bukan model mesin
@@ -69,6 +73,10 @@ const BARIS_UNIVERSAL: Record<Section, string[]> = {
   OLI: ['Dryer'],
   LAIN: ['Jasa Service & Repair', 'Jasa New Instalasi', 'Jasa Kalibrasi', 'Sedot Limbah B3',
     'Jasa Analisa GAS', 'Jasa Analisa OLI', 'OTHERS'],
+  // Kosong sengaja — kode kontainer ISO Tank sepenuhnya dinamis dari data
+  // (lihat urutkanBarisSeksi), tak ada kategori generik yang perlu selalu
+  // ditampilkan meski kosong.
+  ISOTANK: [],
 };
 
 /**
@@ -106,7 +114,7 @@ const rupiahPenuh = (n: number) => `Rp ${Math.round(n).toLocaleString('id-ID')}`
 // Tapi tidak semua site adalah Mother Station — mis. WS Dawuan — yang
 // labelnya sudah menyertakan prefix sendiri. Jangan dobel jadi "MS WS
 // Dawuan": kalau label sudah diawali "MS"/"WS", pakai apa adanya.
-const labelPenuh = (label: string) => (/^\s*(ms|ws)\b/i.test(label) ? label : `MS ${label}`);
+const labelPenuh = (label: string) => (/^\s*(ms|ws|lng)\b/i.test(label) ? label : `MS ${label}`);
 
 // Sebagian site (WS Dawuan/"indramayu") itu bengkel armada kendaraan, bukan
 // fasilitas dengan mesin tetap — kolom Alokasi-nya diisi PLAT KENDARAAN yang
@@ -161,6 +169,11 @@ const TAB_DEFAULT = (site: string) => {
   if (site === 'indramayu') {
     // WS Dawuan (key tetap "indramayu") juga cuma dua tab polos "Out"/"In",
     // sama seperti MS Blora — bukan pola "Report Weekly MS ... RDA OUT".
+    return ['Out', 'In'];
+  }
+  if (site === 'sangkulirang') {
+    // LNG Sangkulirang juga dua tab polos "Out"/"In" (terpisah dari tab
+    // Stock Part/OS PR/Stacking Management yang bukan bagian laporan ini).
     return ['Out', 'In'];
   }
   return [`Report Weekly MS ${s} RDA OUT`, `Report Weekly MS ${s} RDA IN`,
@@ -274,7 +287,7 @@ export function WeeklyReportView({ auth }: Props) {
     const minggus = [...mingguSet].sort((a, b) => a - b);
 
     const kelompokKegiatan = rows.length > 0 && SITE_KELOMPOK_KEGIATAN.has(rows[0].site);
-    const p: Record<Section, Record<string, Record<number, number>>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {} };
+    const p: Record<Section, Record<string, Record<number, number>>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {}, ISOTANK: {} };
     if (!kelompokKegiatan) {
       for (const s of SECTIONS) for (const a of BARIS_UNIVERSAL[s.key]) p[s.key][a] = {};
     }
@@ -283,7 +296,7 @@ export function WeeklyReportView({ auth }: Props) {
       bucket[r.minggu] = (bucket[r.minggu] ?? 0) + r.totalHarga;
     }
 
-    const ts: Record<Section, Record<number, number>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {} };
+    const ts: Record<Section, Record<number, number>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {}, ISOTANK: {} };
     const gt: Record<number, number> = {};
     for (const s of SECTIONS) {
       for (const baris of Object.values(p[s.key])) {
@@ -776,7 +789,8 @@ export function WeeklyReportView({ auth }: Props) {
             {bulan ? ` ${NAMA_BULAN[bulan - 1]}` : ` ${tahun}`} sebesar <strong style={{ color: '#00D084' }}>{rupiahPenuh(totalPerSeksi.MAINT)}</strong>;
             biaya Overhold <strong style={{ color: '#60A5FA' }}>{rupiahPenuh(totalPerSeksi.OH)}</strong>;
             pemakaian OLI <strong style={{ color: '#FBBF24' }}>{rupiahPenuh(totalPerSeksi.OLI)}</strong>;
-            biaya Lain-Lain <strong style={{ color: '#C084FC' }}>{rupiahPenuh(totalPerSeksi.LAIN)}</strong>.
+            biaya Lain-Lain <strong style={{ color: '#C084FC' }}>{rupiahPenuh(totalPerSeksi.LAIN)}</strong>
+            {totalPerSeksi.ISOTANK > 0 && <>; biaya ISO Tank <strong style={{ color: '#22D3EE' }}>{rupiahPenuh(totalPerSeksi.ISOTANK)}</strong></>}.
             Grand Total <strong style={{ color: '#00D084' }}>{rupiahPenuh(totalKeseluruhan)}</strong> dari {rows.length} baris transaksi keluar.
           </div>
         </>
