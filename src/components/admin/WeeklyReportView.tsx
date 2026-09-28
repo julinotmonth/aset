@@ -11,16 +11,17 @@ import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'rea
 import type { CSSProperties } from 'react';
 import {
   RefreshCw, Upload, Link2, Download, AlertTriangle, CheckCircle2, Loader2,
-  TrendingDown, TrendingUp, Package, Boxes, ClipboardList,
+  TrendingDown, TrendingUp, Package, Boxes, ClipboardList, Target,
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import type { AuthState } from '../../types';
 import { api } from '../../lib/api';
 import { getSites } from '../../data/siteStore';
 import { PicaView } from './PicaView';
+import { WorkTargetView } from './WorkTargetView';
 
 // ── Tipe ──────────────────────────────────────────────────────────────────
 type Section = 'MAINT' | 'OH' | 'OLI' | 'LAIN' | 'ISOTANK';
@@ -106,6 +107,13 @@ const NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
 
 const PALET = ['#00D084', '#60A5FA', '#FBBF24', '#C084FC', '#F472B6', '#38BDF8', '#A3E635', '#F87171'];
 
+// Palet warna untuk membedakan vendor/supplier di grafik Barang Masuk —
+// jumlah vendor dinamis (beda-beda tiap site/minggu), jadi dipetakan bergilir
+// dari daftar ini berdasarkan urutan (vendor dengan nilai terbesar duluan),
+// bukan warna tetap per nama seperti section (yang jumlahnya cuma 5 & tetap).
+const PALET_VENDOR = ['#00D084', '#60A5FA', '#FBBF24', '#C084FC', '#F472B6', '#22D3EE', '#F97316', '#A3E635'];
+const WARNA_VENDOR_LAINNYA = '#64748B';
+
 const rupiah = (n: number) => (n === 0 ? '-' : `Rp ${Math.round(n).toLocaleString('id-ID')}`);
 const rupiahPenuh = (n: number) => `Rp ${Math.round(n).toLocaleString('id-ID')}`;
 
@@ -125,6 +133,13 @@ const labelPenuh = (label: string) => (/^\s*(ms|ws|lng)\b/i.test(label) ? label 
 // dipivot per "Detail Alokasi" (jenis kegiatan: Service berkala, Overhaul,
 // dll) yang jumlahnya jauh lebih sedikit dan lebih bermakna dibaca.
 const SITE_KELOMPOK_KEGIATAN = new Set<string>(['indramayu']);
+
+// Site yang laporan aslinya ("Week ...") cuma punya dua kelompok — ISO Tank
+// dan Lain-Lain — tanpa Part Maintenance/OH/Consumption OLI terpisah sama
+// sekali (lihat classifySection() di backend: site ini semua barisnya
+// diklasifikasi ISOTANK atau LAIN saja). Tiga kartu/section itu disembunyikan
+// di sini supaya tidak menampilkan tabel kosong yang memang tidak relevan.
+const SITE_HANYA_LAIN_ISOTANK = new Set<string>(['sangkulirang']);
 
 /** Kunci baris pivot untuk satu baris data: Alokasi (default) atau Detail
  * Alokasi (site di SITE_KELOMPOK_KEGIATAN). Detail Alokasi kosong ditandai
@@ -204,11 +219,11 @@ const tooltipStyle = {
   borderRadius: 10, fontSize: '.75rem', color: '#fff',
 };
 
-function PanelGrafik({ judul, children }: { judul: string; children: React.ReactNode }) {
+function PanelGrafik({ judul, children, tinggi = 250 }: { judul: string; children: React.ReactNode; tinggi?: number }) {
   return (
     <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.1rem', flex: '1 1 340px', minWidth: 300 }}>
       <div style={{ fontSize: '.78rem', fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.75rem' }}>{judul}</div>
-      <div style={{ height: 250 }}>{children}</div>
+      <div style={{ height: tinggi }}>{children}</div>
     </div>
   );
 }
@@ -230,6 +245,7 @@ export function WeeklyReportView({ auth }: Props) {
   const [bulan, setBulan] = useState<number | 0>(0);
   const [arah, setArah] = useState<'IN' | 'OUT' | 'ASET'>('OUT');
   const [picaAktif, setPicaAktif] = useState(false);
+  const [workTargetAktif, setWorkTargetAktif] = useState(false);
 
   const [rows, setRows] = useState<WeeklyRow[]>([]);
   const [volumes, setVolumes] = useState<Record<number, number>>({});
@@ -316,6 +332,15 @@ export function WeeklyReportView({ auth }: Props) {
     SECTIONS.map((s) => [s.key, Object.values(totalSeksi[s.key]).reduce((a, b) => a + b, 0)])
   ) as Record<Section, number>, [totalSeksi]);
 
+  // Section yang ditampilkan sebagai kartu/tabel — untuk site yang memang
+  // tak pernah punya Part Maintenance/OH/Consumption OLI (lihat
+  // SITE_HANYA_LAIN_ISOTANK), ketiganya disembunyikan supaya tidak muncul
+  // kartu/tabel kosong yang tidak relevan dengan laporan asli site itu.
+  const sectionsAktif = useMemo(
+    () => (SITE_HANYA_LAIN_ISOTANK.has(site) ? SECTIONS.filter((s) => s.key === 'LAIN' || s.key === 'ISOTANK') : SECTIONS),
+    [site]
+  );
+
   // Data grafik mode KELUAR: batang bertumpuk per minggu + pie komposisi seksi.
   const dataBatangKeluar = useMemo(() => mingguList.map((m) => ({
     minggu: `W${m}`,
@@ -344,18 +369,37 @@ export function WeeklyReportView({ auth }: Props) {
     const kategori = Object.entries(perKategori)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-    // Kategori kecil digabung agar pie tetap terbaca.
+    // Kategori/vendor kecil digabung "Lainnya" biar pie & batang tetap
+    // terbaca — untuk Barang Masuk, "Alokasi" itu sebenarnya nama Supplier
+    // (lihat pemetaan header di backend), jadi ini otomatis pecah per vendor.
     const atas = kategori.slice(0, 6);
     const sisa = kategori.slice(6).reduce((s, k) => s + k.value, 0);
     if (sisa > 0) atas.push({ name: 'Lainnya', value: sisa });
+
+    // Warna per vendor: urutan sama seperti `atas` (terbesar duluan) supaya
+    // warna di grafik batang mingguan dan pie komposisi selalu konsisten
+    // untuk vendor yang sama.
+    const vendorTop = atas.map((k, i) => ({
+      name: k.name,
+      warna: k.name === 'Lainnya' ? WARNA_VENDOR_LAINNYA : PALET_VENDOR[i % PALET_VENDOR.length],
+    }));
+    const vendorSet = new Set(vendorTop.map((v) => v.name));
+
+    const perMingguVendor: Record<number, Record<string, number>> = {};
+    for (const r of rows) {
+      const nama = vendorSet.has(r.alokasi) ? r.alokasi : 'Lainnya';
+      const bucket = (perMingguVendor[r.minggu] ??= {});
+      bucket[nama] = (bucket[nama] ?? 0) + r.totalHarga;
+    }
 
     return {
       nilai, qty, baris: rows.length,
       batang: mingguList.map((m) => ({
         minggu: `W${m}`,
-        Nilai: perMinggu[m]?.nilai ?? 0,
         item: perMinggu[m]?.item ?? 0,
+        ...Object.fromEntries(vendorTop.map((v) => [v.name, perMingguVendor[m]?.[v.name] ?? 0])),
       })),
+      vendorTop,
       pie: atas,
       semua: [...rows].sort((a, b) => b.totalHarga - a.totalHarga),
     };
@@ -396,17 +440,37 @@ export function WeeklyReportView({ auth }: Props) {
   // tanpa memakai sumbu minggu seperti dua mode lainnya.
   const aset = useMemo(() => {
     const perLokasi: Record<string, number> = {};
+    // Kategori (kolom "Jenis" di sheet — ALAT KANTOR/TOOLS INVENTORY/dst.)
+    // dipakai untuk pie distribusi & grafik nilai, terpisah dari perLokasi
+    // di atas yang cuma dipakai untuk statistik "X lokasi" di catatan NB.
+    const perKategori: Record<string, { jumlahAset: number; jumlahBarang: number; totalHarga: number }> = {};
     let nilai = 0, nilaiEstimasi = 0, qty = 0;
     for (const r of rows) {
       nilai += r.totalHarga;
       if (!r.totalHarga && r.hargaEstimasi) nilaiEstimasi += r.hargaEstimasi;
       qty += r.jumlah;
       perLokasi[r.alokasi] = (perLokasi[r.alokasi] ?? 0) + 1;
+      const namaKategori = r.jenis?.trim() || 'Lainnya';
+      const k = (perKategori[namaKategori] ??= { jumlahAset: 0, jumlahBarang: 0, totalHarga: 0 });
+      k.jumlahAset += 1;
+      k.jumlahBarang += r.jumlah;
+      k.totalHarga += r.totalHarga || r.hargaEstimasi || 0;
     }
     const lokasi = Object.entries(perLokasi).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-    const atas = lokasi.slice(0, 7);
-    const sisa = lokasi.slice(7).reduce((s, k) => s + k.value, 0);
-    if (sisa > 0) atas.push({ name: 'Lainnya', value: sisa });
+
+    const kategoriUrut = Object.entries(perKategori).sort((a, b) => b[1].jumlahAset - a[1].jumlahAset);
+    // Pie distribusi jumlah aset per kategori — kategori kecil digabung
+    // "Lainnya" biar tetap terbaca, sama seperti pola pie lain di halaman ini.
+    const pieKategoriMentah = kategoriUrut.map(([name, k]) => ({ name, value: k.jumlahAset }));
+    const pieKategoriAtas = pieKategoriMentah.slice(0, 7);
+    const pieKategoriSisa = pieKategoriMentah.slice(7).reduce((s, k) => s + k.value, 0);
+    if (pieKategoriSisa > 0) pieKategoriAtas.push({ name: 'Lainnya', value: pieKategoriSisa });
+    // Grafik Total Harga & Jumlah Barang: semua kategori ditampilkan apa
+    // adanya (tanpa digabung "Lainnya") karena di sini yang dibaca adalah
+    // besaran nilai/kuantitasnya, bukan porsi terhadap keseluruhan.
+    const metrikKategori = kategoriUrut.map(([name, k]) => ({
+      name, 'Total Harga': k.totalHarga, 'Jumlah Barang': k.jumlahBarang,
+    }));
 
     // Kelompokkan per sub-bab (mis. "Main Office") persis seperti pembagian
     // baris di sheet "LIST ALL ASET ..." — urutan sub-bab mengikuti urutan
@@ -425,7 +489,8 @@ export function WeeklyReportView({ auth }: Props) {
 
     return {
       nilai, nilaiEstimasi, qty, baris: rows.length, lokasiUnik: lokasi.length,
-      pieLokasi: atas,
+      pieKategori: pieKategoriAtas,
+      metrikKategori,
       subBab,
       semua: [...rows].sort((a, b) => a.namaBarang.localeCompare(b.namaBarang)),
     };
@@ -561,12 +626,19 @@ export function WeeklyReportView({ auth }: Props) {
           { id: 'IN', label: 'Barang Masuk', ikon: TrendingUp, warna: '#00D084' },
           { id: 'ASET', label: 'Daftar Aset', ikon: Boxes, warna: '#60A5FA' },
           { id: 'PICA', label: 'PICA', ikon: ClipboardList, warna: '#FBBF24' },
+          { id: 'WORK_TARGET', label: 'Work Target', ikon: Target, warna: '#C084FC' },
         ] as const).map((t) => {
-          const aktif = t.id === 'PICA' ? picaAktif : (!picaAktif && arah === t.id);
+          const aktif = t.id === 'PICA' ? picaAktif
+            : t.id === 'WORK_TARGET' ? workTargetAktif
+            : (!picaAktif && !workTargetAktif && arah === t.id);
           const Ikon = t.ikon;
           return (
             <button key={t.id} type="button"
-              onClick={() => { if (t.id === 'PICA') setPicaAktif(true); else { setPicaAktif(false); setArah(t.id); } }}
+              onClick={() => {
+                if (t.id === 'PICA') { setPicaAktif(true); setWorkTargetAktif(false); }
+                else if (t.id === 'WORK_TARGET') { setWorkTargetAktif(true); setPicaAktif(false); }
+                else { setPicaAktif(false); setWorkTargetAktif(false); setArah(t.id); }
+              }}
               style={{
                 display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.55rem 1.1rem',
                 borderRadius: 12, cursor: 'pointer', fontWeight: 600, fontSize: '.82rem',
@@ -583,7 +655,11 @@ export function WeeklyReportView({ auth }: Props) {
       {/* Mode PICA (Problem/Identification/Corrective Action) punya bentuk data
           & panel sumber yang sama sekali beda dari Barang Masuk/Keluar/Aset —
           komponen sendiri, cuma berbagi header halaman & pemilih site. */}
-      {picaAktif ? (
+      {workTargetAktif ? (
+        // Work Target: satu sheet untuk seluruh perusahaan (bukan per site) —
+        // tidak butuh pemilih site/bulan/tahun dari halaman ini.
+        <WorkTargetView auth={auth} />
+      ) : picaAktif ? (
         <PicaView site={site} labelSite={labelPenuh(labelSite)} sites={sites}
           onSiteChange={(s) => setSite(s)} siteTerkunci={siteTerkunci} />
       ) : (
@@ -682,7 +758,7 @@ export function WeeklyReportView({ auth }: Props) {
       {!memuat && !kosong && arah === 'OUT' && (
         <>
           <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            {SECTIONS.map((s) => (
+            {sectionsAktif.map((s) => (
               <KartuKpi key={s.key} ikon={Package} warna={s.warna} label={LABEL_SEKSI[s.key]}
                 nilai={rupiahPenuh(totalPerSeksi[s.key])}
                 sub={totalKeseluruhan ? `${((totalPerSeksi[s.key] / totalKeseluruhan) * 100).toFixed(1)}% dari total` : undefined} />
@@ -690,18 +766,19 @@ export function WeeklyReportView({ auth }: Props) {
           </div>
 
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <PanelGrafik judul="Biaya per Minggu (bertumpuk per kategori)">
+            <PanelGrafik judul="Biaya per Minggu (per kategori)" tinggi={300}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dataBatangKeluar} margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
+                <LineChart data={dataBatangKeluar} margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" vertical={false} />
                   <XAxis dataKey="minggu" tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={ringkas} tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} width={52} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={fmtTooltip} cursor={{ fill: 'rgba(255,255,255,.05)' }} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={fmtTooltip} cursor={{ stroke: 'rgba(255,255,255,.15)' }} />
                   <Legend wrapperStyle={{ fontSize: '.72rem' }} />
-                  {SECTIONS.map((s) => (
-                    <Bar key={s.key} dataKey={LABEL_SEKSI[s.key]} stackId="a" fill={s.warna} radius={s.key === 'LAIN' ? [4, 4, 0, 0] : undefined} />
+                  {sectionsAktif.map((s) => (
+                    <Line key={s.key} type="monotone" dataKey={LABEL_SEKSI[s.key]} stroke={s.warna}
+                      strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                   ))}
-                </BarChart>
+                </LineChart>
               </ResponsiveContainer>
             </PanelGrafik>
 
@@ -722,7 +799,7 @@ export function WeeklyReportView({ auth }: Props) {
           <div className="glass-panel" style={{ borderRadius: 16, overflowX: 'auto' }}>
             <table className="simple-table" style={{ minWidth: 820, borderCollapse: 'collapse', width: '100%' }}>
               <tbody>
-                {SECTIONS.map((s) => (
+                {sectionsAktif.map((s) => (
                   <Fragment key={s.key}>
                     <tr>
                       <td colSpan={mingguList.length + 2}
@@ -811,14 +888,18 @@ export function WeeklyReportView({ auth }: Props) {
           </div>
 
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <PanelGrafik judul="Nilai Barang Masuk per Minggu">
+            <PanelGrafik judul="Nilai Barang Masuk per Minggu (per vendor)">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={masuk.batang} margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" vertical={false} />
                   <XAxis dataKey="minggu" tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={ringkas} tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} width={52} />
                   <Tooltip contentStyle={tooltipStyle} formatter={fmtTooltip} cursor={{ fill: 'rgba(255,255,255,.05)' }} />
-                  <Bar dataKey="Nilai" fill="#00D084" radius={[4, 4, 0, 0]} />
+                  <Legend wrapperStyle={{ fontSize: '.7rem' }} />
+                  {masuk.vendorTop.map((v, i) => (
+                    <Bar key={v.name} dataKey={v.name} stackId="a" fill={v.warna}
+                      radius={i === masuk.vendorTop.length - 1 ? [4, 4, 0, 0] : undefined} />
+                  ))}
                 </BarChart>
               </ResponsiveContainer>
             </PanelGrafik>
@@ -827,7 +908,7 @@ export function WeeklyReportView({ auth }: Props) {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={masuk.pie} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2}>
-                    {masuk.pie.map((d, i) => <Cell key={d.name} fill={PALET[i % PALET.length]} stroke="transparent" />)}
+                    {masuk.pie.map((d, i) => <Cell key={d.name} fill={masuk.vendorTop[i]?.warna ?? PALET[i % PALET.length]} stroke="transparent" />)}
                   </Pie>
                   <Tooltip contentStyle={tooltipStyle} formatter={fmtTooltip} />
                   <Legend wrapperStyle={{ fontSize: '.72rem' }} />
@@ -918,11 +999,11 @@ export function WeeklyReportView({ auth }: Props) {
           </div>
 
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <PanelGrafik judul="Distribusi Aset per Lokasi / Kategori">
+            <PanelGrafik judul="Distribusi Aset per Kategori">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={aset.pieLokasi} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2}>
-                    {aset.pieLokasi.map((d, i) => <Cell key={d.name} fill={PALET[i % PALET.length]} stroke="transparent" />)}
+                  <Pie data={aset.pieKategori} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2}>
+                    {aset.pieKategori.map((d, i) => <Cell key={d.name} fill={PALET[i % PALET.length]} stroke="transparent" />)}
                   </Pie>
                   <Tooltip contentStyle={tooltipStyle} formatter={(v: unknown) => `${v} item`} />
                   <Legend wrapperStyle={{ fontSize: '.72rem' }} />
@@ -930,15 +1011,19 @@ export function WeeklyReportView({ auth }: Props) {
               </ResponsiveContainer>
             </PanelGrafik>
 
-            <PanelGrafik judul="Jumlah Aset per Lokasi (batang)">
+            <PanelGrafik judul="Total Harga & Jumlah Barang per Kategori" tinggi={290}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={aset.pieLokasi} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={(v: unknown) => `${v} item`} cursor={{ fill: 'rgba(255,255,255,.05)' }} />
-                  <Bar dataKey="value" fill="#60A5FA" radius={[0, 4, 4, 0]} />
-                </BarChart>
+                <LineChart data={aset.metrikKategori} margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false}
+                    interval={0} angle={-20} textAnchor="end" height={50} />
+                  <YAxis yAxisId="harga" tickFormatter={ringkas} tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} width={52} />
+                  <YAxis yAxisId="jumlah" orientation="right" tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} width={36} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v: unknown, n?: unknown) => (n === 'Total Harga' ? rupiahPenuh(Number(v)) : `${v} unit`)} />
+                  <Legend wrapperStyle={{ fontSize: '.72rem' }} />
+                  <Line yAxisId="harga" type="monotone" dataKey="Total Harga" stroke="#FBBF24" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  <Line yAxisId="jumlah" type="monotone" dataKey="Jumlah Barang" stroke="#60A5FA" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                </LineChart>
               </ResponsiveContainer>
             </PanelGrafik>
           </div>
