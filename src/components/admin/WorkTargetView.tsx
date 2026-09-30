@@ -11,10 +11,10 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import type { CSSProperties } from 'react';
 import {
-  Link2, RefreshCw, Loader2, CheckCircle2, AlertTriangle, Search, Target, ListChecks, TrendingUp, Gauge,
+  Link2, RefreshCw, Loader2, CheckCircle2, AlertTriangle, Search, Target, ListChecks, TrendingUp, Gauge, Lock,
 } from 'lucide-react';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine, Legend,
 } from 'recharts';
 import { api } from '../../lib/api';
 import type { AuthState } from '../../types';
@@ -80,6 +80,151 @@ function KartuKpi({ ikon: Ikon, label, nilai, sub, warna }: {
   );
 }
 
+const PALET_PIC = ['#00D084', '#60A5FA', '#FBBF24', '#C084FC', '#F472B6', '#22D3EE', '#F97316', '#A3E635', '#F87171'];
+
+interface GrupObjective { key: string; no: string; objective: string; activity: string; baris: WorkTargetItem[] }
+
+/** Target yang paling sering muncul di satu grup (semua baris satu Work Target
+ * biasanya berbagi target yang sama, mis. 100% atau 5%). */
+const targetGrup = (baris: WorkTargetItem[]): number | null => {
+  const hitung = new Map<number, number>();
+  for (const b of baris) if (b.targetAngka !== null) hitung.set(b.targetAngka, (hitung.get(b.targetAngka) ?? 0) + 1);
+  let terbaik: number | null = null, n = 0;
+  for (const [t, c] of hitung) if (c > n) { terbaik = t; n = c; }
+  return terbaik;
+};
+
+type StatusLock = 'lock' | 'belum' | 'kosong' | 'vacant';
+
+/** "Lock" = capaian bulan terakhir yang terisi sudah mencapai target. */
+const statusLock = (it: WorkTargetItem): StatusLock => {
+  if (it.pic.trim().toLowerCase() === 'vacant') return 'vacant';
+  if (it.capaianAngka === null || it.targetAngka === null) return 'kosong';
+  return it.capaianAngka >= it.targetAngka ? 'lock' : 'belum';
+};
+
+/** Satu kartu per Work Target: grafik garis per PIC + daftar siapa yang sudah
+ * lock target dan siapa yang belum. */
+function PanelObjective({ g, bulan }: { g: GrupObjective; bulan: string[] }) {
+  const target = targetGrup(g.baris);
+
+  // Satu garis per PIC (baris yang punya minimal satu nilai capaian). Nama PIC
+  // yang kembar dalam satu grup dibedakan dengan nomor supaya tidak saling menimpa.
+  const seri = useMemo(() => {
+    const dipakai = new Map<string, number>();
+    return g.baris
+      .filter((r) => Object.values(r.pencapaian).some((v) => parseAngka(v) !== null))
+      .map((r, i) => {
+        const dasar = r.pic || 'Tanpa PIC';
+        const n = (dipakai.get(dasar) ?? 0) + 1;
+        dipakai.set(dasar, n);
+        return { item: r, nama: n > 1 ? `${dasar} (${n})` : dasar, warna: PALET_PIC[i % PALET_PIC.length] };
+      });
+  }, [g.baris]);
+
+  const data = useMemo(() => bulan.map((b) => ({
+    bulan: b,
+    ...Object.fromEntries(seri.map((x) => [x.nama, parseAngka(x.item.pencapaian[b])])),
+  })), [bulan, seri]);
+
+  const [lo, hi] = useMemo(() => {
+    const nilai: number[] = [];
+    for (const x of seri) for (const b of bulan) { const v = parseAngka(x.item.pencapaian[b]); if (v !== null) nilai.push(v); }
+    if (target !== null) nilai.push(target);
+    if (!nilai.length) return [0, 100];
+    const kecil = Math.min(...nilai), besar = Math.max(...nilai);
+    return [Math.max(0, Math.floor((kecil - 5) / 10) * 10), Math.ceil((besar + 2) / 5) * 5];
+  }, [seri, bulan, target]);
+
+  const hitung = { lock: 0, belum: 0, kosong: 0, vacant: 0 } as Record<StatusLock, number>;
+  for (const r of g.baris) hitung[statusLock(r)]++;
+
+  const warnaLock: Record<StatusLock, string> = { lock: '#00D084', belum: '#F87171', kosong: '#94A3B8', vacant: '#FBBF24' };
+  const teksTarget = target === null ? '' : `${target}%`;
+
+  return (
+    <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.1rem' }}>
+      <div style={{ display: 'flex', gap: '.6rem', alignItems: 'baseline', flexWrap: 'wrap', marginBottom: '.2rem' }}>
+        <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--txt-primary)' }}>
+          {g.no ? `${g.no}. ` : ''}{g.objective}
+        </div>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: '.72rem', color: '#00D084', fontWeight: 600 }}>{hitung.lock} lock</span>
+        <span style={{ fontSize: '.72rem', color: '#F87171', fontWeight: 600 }}>{hitung.belum} belum</span>
+        {(hitung.kosong + hitung.vacant) > 0 && (
+          <span style={{ fontSize: '.72rem', color: '#94A3B8', fontWeight: 600 }}>{hitung.kosong + hitung.vacant} tanpa data</span>
+        )}
+      </div>
+      {g.activity && <div style={{ fontSize: '.72rem', color: 'var(--txt-muted)', marginBottom: '.75rem' }}>{g.activity}</div>}
+
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <div style={{ flex: '2 1 380px', minWidth: 300, height: 250 }}>
+          {seri.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" vertical={false} />
+                <XAxis dataKey="bulan" tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} />
+                <YAxis domain={[lo, hi]} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 11, fill: 'var(--txt-muted)' }} axisLine={false} tickLine={false} width={44} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v: unknown) => `${v}%`} />
+                <Legend wrapperStyle={{ fontSize: '.72rem' }} />
+                {target !== null && (
+                  <ReferenceLine y={target} stroke="rgba(0,208,132,.6)" strokeDasharray="4 4"
+                    label={{ value: `Target ${teksTarget}`, fill: '#00D084', fontSize: 10, position: 'insideBottomRight' }} />
+                )}
+                {seri.map((x) => (
+                  <Line key={x.nama} type="monotone" dataKey={x.nama} stroke={x.warna} strokeWidth={2.2}
+                    dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: 'var(--txt-muted)', fontSize: '.78rem', textAlign: 'center' }}>
+              Belum ada data capaian untuk Work Target ini.
+            </div>
+          )}
+        </div>
+
+        {/* Siapa yang sudah lock target, siapa yang belum */}
+        <div style={{ flex: '1 1 260px', minWidth: 240, display: 'grid', gap: '.4rem' }}>
+          {g.baris.map((r) => {
+            const st = statusLock(r);
+            const bulanAda = Object.keys(r.pencapaian).filter((b) => parseAngka(r.pencapaian[b]) !== null);
+            const capai = r.targetAngka === null ? 0 : bulanAda.filter((b) => (parseAngka(r.pencapaian[b]) ?? 0) >= (r.targetAngka ?? 0)).length;
+            const kurang = st === 'belum' && r.capaianAngka !== null && r.targetAngka !== null ? r.targetAngka - r.capaianAngka : 0;
+            return (
+              <div key={r.id} style={{
+                display: 'flex', gap: '.55rem', alignItems: 'center', padding: '.4rem .55rem', borderRadius: 10,
+                background: `${warnaLock[st]}12`, border: `1px solid ${warnaLock[st]}33`,
+              }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '.76rem', fontWeight: 700, color: 'var(--txt-primary)' }}>{r.pic || '-'}</div>
+                  <div style={{ fontSize: '.66rem', color: 'var(--txt-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.strategi}>
+                    {r.strategi}
+                  </div>
+                  {bulanAda.length > 0 && (
+                    <div style={{ fontSize: '.66rem', color: 'var(--txt-muted)' }}>
+                      {r.bulanTerakhir}: {r.pencapaian[r.bulanTerakhir]} · {capai}/{bulanAda.length} bulan ≥ target
+                    </div>
+                  )}
+                </div>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '.25rem', padding: '.15rem .5rem', borderRadius: 999,
+                  fontSize: '.66rem', fontWeight: 700, whiteSpace: 'nowrap', color: warnaLock[st], background: `${warnaLock[st]}1F`,
+                }}>
+                  {st === 'lock' && <><Lock size={10} /> Lock {r.targetRaw}</>}
+                  {st === 'belum' && <>Belum · -{kurang.toFixed(kurang % 1 ? 1 : 0)} poin</>}
+                  {st === 'kosong' && <>Belum ada data</>}
+                  {st === 'vacant' && <>Vacant</>}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface Props { auth: AuthState; }
 
 export function WorkTargetView({ auth }: Props) {
@@ -127,8 +272,8 @@ export function WorkTargetView({ auth }: Props) {
     setMenyinkron(true);
     setPesan(null);
     try {
-      const hasil = await api.post<{ inserted: number; updated: number; removed: number; total: number }>('/work-target/sync', {});
-      setPesan({ tipe: 'ok', teks: `Sinkron selesai — ${hasil.total} baris (${hasil.inserted} baru, ${hasil.updated} diperbarui${hasil.removed ? `, ${hasil.removed} dihapus karena sudah tak ada di sheet` : ''}).` });
+      const hasil = await api.post<{ inserted: number; updated: number; removed: number; total: number; terbaca?: { targetIdx: number; bulan: string[] } }>('/work-target/sync', {});
+      setPesan({ tipe: 'ok', teks: `Sinkron selesai — ${hasil.total} baris (${hasil.inserted} baru, ${hasil.updated} diperbarui${hasil.removed ? `, ${hasil.removed} dihapus karena sudah tak ada di sheet` : ''}).${hasil.terbaca ? ` Terbaca: kolom Target ${hasil.terbaca.targetIdx >= 0 ? 'ditemukan' : 'TIDAK ditemukan'}, bulan ${hasil.terbaca.bulan.map((x) => x.split('@')[0]).join(', ')}.` : ''}` });
       await muat();
     } catch (err) {
       setPesan({ tipe: 'error', teks: err instanceof Error ? err.message : 'Sinkronisasi gagal.' });
@@ -186,6 +331,19 @@ export function WorkTargetView({ auth }: Props) {
     }
     return urutan.map((k) => peta[k]);
   }, [ditampilkan]);
+
+  // Grafik per Work Target selalu memakai SEMUA baris (tidak ikut filter
+  // pencarian/status di atas) supaya tiap grafik tetap utuh.
+  const grupSemua = useMemo(() => {
+    const urutan: string[] = [];
+    const peta: Record<string, GrupObjective> = {};
+    for (const it of items) {
+      const key = `${it.noObjective}|${it.objective}`;
+      if (!peta[key]) { peta[key] = { key, no: it.noObjective, objective: it.objective, activity: it.activity, baris: [] }; urutan.push(key); }
+      peta[key].baris.push(it);
+    }
+    return urutan.map((k) => peta[k]);
+  }, [items]);
 
   const kosong = !memuat && !items.length;
   const kolomTotal = 3 + bulanTampil.length + 2;
@@ -314,6 +472,13 @@ export function WorkTargetView({ auth }: Props) {
               </div>
             </div>
           )}
+
+          <div style={{ fontSize: '.82rem', fontWeight: 700, color: 'var(--txt-primary)', margin: '0 0 .6rem .2rem' }}>
+            Grafik per Work Target — siapa yang sudah lock target, siapa yang belum
+          </div>
+          <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.25rem' }}>
+            {grupSemua.map((g) => <PanelObjective key={g.key} g={g} bulan={bulanTampil} />)}
+          </div>
 
           <div className="glass-panel" style={{ borderRadius: 16, overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>
