@@ -15,10 +15,12 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import type { CSSProperties } from 'react';
 import {
-  Link2, RefreshCw, Loader2, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight, Search, ListChecks,
+  Link2, RefreshCw, Loader2, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight, Search, ListChecks, Clock,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import type { SiteMeta } from '../../data/siteStore';
+import { NADA, WR_CSS } from './wrTema';
+import type { Nada } from './wrTema';
 
 interface PicaUpdate { week: string; catatan: string }
 
@@ -39,13 +41,11 @@ interface Props {
   onSiteChange: (site: string) => void; siteTerkunci: boolean;
 }
 
-const kontrol: CSSProperties = {
-  padding: '.5rem .7rem', borderRadius: 10, background: 'rgba(255,255,255,.05)',
-  border: '1px solid rgba(255,255,255,.12)', color: 'var(--txt-primary)', fontSize: '.82rem',
-};
+// Warna kontrol/tombol datang dari kelas .wr-ctl / .wr-btn (WR_CSS) — di sini
+// hanya tata letak.
+const kontrol: CSSProperties = { padding: '.5rem .7rem', borderRadius: 10, fontSize: '.82rem' };
 const tombol: CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: '.4rem', padding: '.5rem .85rem', borderRadius: 10,
-  background: 'rgba(255,255,255,.06)', color: 'var(--txt-primary)', border: '1px solid rgba(255,255,255,.14)', cursor: 'pointer',
+  display: 'flex', alignItems: 'center', gap: '.4rem', padding: '.5rem .85rem', borderRadius: 10, cursor: 'pointer',
 };
 
 const fmtTgl = (iso: string | null) => {
@@ -60,8 +60,10 @@ const golonganStatus = (status: string): 'selesai' | 'overdue' | 'jalan' => {
   if (s.includes('overdue') || s.includes('terlambat')) return 'overdue';
   return 'jalan'; // On Going / default
 };
-const warnaGolongan: Record<string, string> = { selesai: '#00D084', overdue: '#F87171', jalan: '#FBBF24' };
-const warnaStatus = (status: string): string => warnaGolongan[golonganStatus(status)];
+type Golongan = ReturnType<typeof golonganStatus>;
+const NADA_GOLONGAN: Record<Golongan, Nada> = { selesai: NADA.in, overdue: NADA.neg, jalan: NADA.warn };
+// Ikon = pembeda status selain warna.
+const IKON_GOLONGAN: Record<Golongan, React.ElementType> = { selesai: CheckCircle2, overdue: AlertTriangle, jalan: Clock };
 
 /** Banyak sel Description/Update di sheet PICA sebetulnya daftar bernomor
  * yang digabung jadi satu paragraf ("1. xxx 2. yyy 3. zzz"), karena satu
@@ -108,18 +110,18 @@ function TeksAtauDaftar({ teks, warna }: { teks: string; warna?: string }) {
   );
 }
 
-function KartuRingkas({ label, nilai, warna, aktif, onClick }: {
-  label: string; nilai: number; warna: string; aktif: boolean; onClick: () => void;
+function KartuRingkas({ label, nilai, nada, aktif, onClick }: {
+  label: string; nilai: number; nada: Nada; aktif: boolean; onClick: () => void;
 }) {
   return (
-    <button type="button" onClick={onClick}
+    <button type="button" onClick={onClick} className="wr-kpi" aria-pressed={aktif}
       style={{
         flex: '1 1 140px', textAlign: 'left', cursor: 'pointer', borderRadius: 14, padding: '.8rem 1rem',
-        background: aktif ? `${warna}1F` : 'rgba(255,255,255,.04)',
-        border: `1px solid ${aktif ? `${warna}66` : 'rgba(255,255,255,.1)'}`,
+        // Kartu aktif: tint + border + garis bawah (bentuk, bukan hanya warna).
+        ...(aktif ? { background: nada.bg, border: `1px solid ${nada.garis}`, boxShadow: `inset 0 -3px 0 ${nada.warna}` } : {}),
       }}>
-      <div style={{ fontSize: '1.35rem', fontWeight: 800, color: warna, lineHeight: 1.1 }}>{nilai}</div>
-      <div style={{ fontSize: '.72rem', color: 'var(--txt-muted)', marginTop: '.2rem' }}>{label}</div>
+      <div style={{ fontSize: '1.35rem', fontWeight: 800, color: nada.teks, lineHeight: 1.1 }}>{nilai}</div>
+      <div style={{ fontSize: '.72rem', color: aktif ? 'var(--txt-secondary)' : 'var(--wr-txt-muted)', marginTop: '.2rem' }}>{label}</div>
     </button>
   );
 }
@@ -207,28 +209,30 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
 
   return (
     <>
+      <style>{WR_CSS}</style>
       {/* Filter + aksi */}
       <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center' }}>
-        <select value={site} onChange={(e) => onSiteChange(e.target.value)} disabled={siteTerkunci} style={kontrol}>
+        <select value={site} onChange={(e) => onSiteChange(e.target.value)} disabled={siteTerkunci} aria-label="Pilih site"
+          className="wr-ctl" style={kontrol}>
           {sites.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
 
         <div style={{ position: 'relative' }}>
-          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--txt-muted)' }} />
-          <input value={cari} onChange={(e) => setCari(e.target.value)} placeholder="Cari problem / PIC / no…"
-            style={{ ...kontrol, paddingLeft: '2rem', width: 220 }} />
+          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--wr-txt-muted)' }} />
+          <input value={cari} onChange={(e) => setCari(e.target.value)} placeholder="Cari problem / PIC / no…" aria-label="Cari isu"
+            className="wr-ctl" style={{ ...kontrol, paddingLeft: '2rem', width: 220, maxWidth: '100%' }} />
         </div>
 
         <div style={{ flex: 1 }} />
 
-        <button type="button" onClick={() => setPanelSumberTerbuka((v) => !v)}
-          style={{ ...tombol, background: 'rgba(96,165,250,.12)', color: '#60A5FA', border: '1px solid rgba(96,165,250,.3)' }}>
+        <button type="button" className="wr-btn wr-btn--info" onClick={() => setPanelSumberTerbuka((v) => !v)}
+          style={tombol}>
           <Link2 size={15} /> Sumber Sheet
         </button>
 
-        <button type="button" onClick={sinkronkan} disabled={menyinkron || !source}
+        <button type="button" className="wr-btn wr-btn--primary" onClick={sinkronkan} disabled={menyinkron || !source}
           title={source ? 'Tarik ulang dari Google Spreadsheet' : 'Atur sumber sheet terlebih dahulu'}
-          style={{ ...tombol, background: '#00D084', color: '#06281A', border: 'none', fontWeight: 600, padding: '.5rem .95rem', cursor: source ? 'pointer' : 'not-allowed', opacity: source ? 1 : .5 }}>
+          style={{ ...tombol, padding: '.5rem .95rem', cursor: source ? 'pointer' : 'not-allowed', opacity: source ? 1 : .5 }}>
           {menyinkron ? <Loader2 size={15} /> : <RefreshCw size={15} />} Sync Sekarang
         </button>
       </div>
@@ -236,13 +240,13 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
       {/* Panel konfigurasi sumber */}
       {panelSumberTerbuka && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '1.1rem 1.25rem', marginBottom: '1rem', display: 'grid', gap: '.75rem' }}>
-          <label style={{ fontSize: '.78rem', color: 'var(--txt-muted)' }}>
+          <label style={{ fontSize: '.78rem', color: 'var(--wr-txt-muted)' }}>
             Link Google Spreadsheet tab PICA untuk {labelSite}
             <input value={urlSheet} onChange={(e) => setUrlSheet(e.target.value)}
               placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
-              style={{ ...kontrol, display: 'block', width: '100%', marginTop: '.35rem' }} />
+              className="wr-ctl" style={{ ...kontrol, display: 'block', width: '100%', marginTop: '.35rem' }} />
           </label>
-          <div style={{ fontSize: '.72rem', color: 'var(--txt-muted)' }}>
+          <div style={{ fontSize: '.72rem', color: 'var(--wr-txt-muted)' }}>
             Tempel link yang langsung mengarah ke tab PICA-nya (klik tab-nya dulu di Google Sheets, lalu copy URL dari
             address bar — akan ada <code>?gid=...</code> di belakang). Beda dengan Laporan Mingguan Barang Masuk/Keluar,
             di sini <strong>tidak perlu ketik nama tab manual</strong> — gid dibaca otomatis dari link.
@@ -250,8 +254,8 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
             {source?.lastSyncAt && <> Sync terakhir: {new Date(source.lastSyncAt).toLocaleString('id-ID')} ({source.lastStatus}).</>}
           </div>
           <div>
-            <button type="button" onClick={simpanSumber}
-              style={{ padding: '.5rem 1rem', borderRadius: 10, background: '#00D084', color: '#06281A', border: 'none', fontWeight: 600, cursor: 'pointer' }}>
+            <button type="button" className="wr-btn wr-btn--primary" onClick={simpanSumber}
+              style={{ padding: '.5rem 1rem', borderRadius: 10, cursor: 'pointer' }}>
               Simpan Sumber
             </button>
           </div>
@@ -259,21 +263,21 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
       )}
 
       {pesan && (
-        <div style={{ display: 'flex', gap: '.5rem', alignItems: 'flex-start', padding: '.7rem .9rem', borderRadius: 12, marginBottom: '1rem', fontSize: '.8rem',
-          background: pesan.tipe === 'ok' ? 'rgba(0,208,132,.1)' : 'rgba(245,158,11,.1)',
-          border: `1px solid ${pesan.tipe === 'ok' ? 'rgba(0,208,132,.35)' : 'rgba(245,158,11,.35)'}`,
-          color: pesan.tipe === 'ok' ? '#00D084' : '#F59E0B' }}>
+        <div role={pesan.tipe === 'ok' ? 'status' : 'alert'} style={{ display: 'flex', gap: '.5rem', alignItems: 'flex-start', padding: '.7rem .9rem', borderRadius: 12, marginBottom: '1rem', fontSize: '.8rem',
+          background: (pesan.tipe === 'ok' ? NADA.in : NADA.neg).bg,
+          border: `1px solid ${(pesan.tipe === 'ok' ? NADA.in : NADA.neg).garis}`,
+          color: (pesan.tipe === 'ok' ? NADA.in : NADA.neg).teks }}>
           {pesan.tipe === 'ok' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
           <span>{pesan.teks}</span>
         </div>
       )}
 
       {memuat && (
-        <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem', textAlign: 'center', color: 'var(--txt-muted)' }}>Memuat PICA…</div>
+        <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)' }}>Memuat PICA…</div>
       )}
 
       {kosong && (
-        <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem', textAlign: 'center', color: 'var(--txt-muted)' }}>
+        <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)' }}>
           Belum ada data PICA untuk {labelSite}. Atur sumber spreadsheet lalu klik "Sync Sekarang".
         </div>
       )}
@@ -282,17 +286,17 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
         <>
           {/* Ringkasan status — klik untuk filter cepat */}
           <div style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <KartuRingkas label="Semua Isu" nilai={ringkasan.total} warna="#60A5FA" aktif={filterGolongan === 'SEMUA'} onClick={() => setFilterGolongan('SEMUA')} />
-            <KartuRingkas label="On Going" nilai={ringkasan.jalan} warna="#FBBF24" aktif={filterGolongan === 'jalan'} onClick={() => setFilterGolongan('jalan')} />
-            <KartuRingkas label="Overdue" nilai={ringkasan.overdue} warna="#F87171" aktif={filterGolongan === 'overdue'} onClick={() => setFilterGolongan('overdue')} />
-            <KartuRingkas label="Selesai / Close" nilai={ringkasan.selesai} warna="#00D084" aktif={filterGolongan === 'selesai'} onClick={() => setFilterGolongan('selesai')} />
+            <KartuRingkas label="Semua Isu" nilai={ringkasan.total} nada={NADA.info} aktif={filterGolongan === 'SEMUA'} onClick={() => setFilterGolongan('SEMUA')} />
+            <KartuRingkas label="On Going" nilai={ringkasan.jalan} nada={NADA.warn} aktif={filterGolongan === 'jalan'} onClick={() => setFilterGolongan('jalan')} />
+            <KartuRingkas label="Overdue" nilai={ringkasan.overdue} nada={NADA.neg} aktif={filterGolongan === 'overdue'} onClick={() => setFilterGolongan('overdue')} />
+            <KartuRingkas label="Selesai / Close" nilai={ringkasan.selesai} nada={NADA.in} aktif={filterGolongan === 'selesai'} onClick={() => setFilterGolongan('selesai')} />
           </div>
 
           <div className="glass-panel" style={{ borderRadius: 16, overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.8rem' }}>
+              <table className="wr-tbl wr-tbl--plain" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.8rem' }}>
                 <thead>
-                  <tr style={{ textAlign: 'left', background: 'rgba(255,255,255,.04)' }}>
+                  <tr style={{ textAlign: 'left' }}>
                     <th style={{ padding: '.6rem .5rem', width: 28 }} />
                     <th style={{ padding: '.6rem .5rem' }}>No</th>
                     <th style={{ padding: '.6rem .5rem' }}>Tanggal</th>
@@ -308,14 +312,23 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
                     const buka = expanded.has(it.id);
                     const rentang = buka ? ringkasMingguan(it.updates) : [];
                     const punyaDetail = it.identifikasi || it.deskripsi || it.updates.length > 0;
+                    const gol = golonganStatus(it.status);
+                    const n = NADA_GOLONGAN[gol];
+                    const IkonSt = IKON_GOLONGAN[gol];
                     return (
                       <Fragment key={it.id}>
-                        <tr style={{ borderTop: '1px solid rgba(255,255,255,.06)', cursor: punyaDetail ? 'pointer' : 'default' }}
+                        <tr className="wr-row" style={{ borderTop: '1px solid var(--wr-line)', cursor: punyaDetail ? 'pointer' : 'default' }}
                           onClick={() => punyaDetail && toggle(it.id)}>
-                          <td style={{ padding: '.6rem .5rem', color: 'var(--txt-muted)' }}>
-                            {punyaDetail && (buka ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
+                          <td style={{ padding: '.6rem .5rem', color: 'var(--wr-txt-muted)' }}>
+                            {/* Tombol sungguhan agar bisa difokus keyboard; kliknya naik ke <tr> yang sudah menangani toggle. */}
+                            {punyaDetail && (
+                              <button type="button" className="wr-chev" aria-expanded={buka}
+                                aria-label={buka ? 'Tutup detail isu' : 'Buka detail isu'}>
+                                {buka ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                            )}
                           </td>
-                          <td style={{ padding: '.6rem .5rem', color: 'var(--txt-muted)' }}>{it.no}</td>
+                          <td style={{ padding: '.6rem .5rem', color: 'var(--wr-txt-muted)' }}>{it.no}</td>
                           <td style={{ padding: '.6rem .5rem', whiteSpace: 'nowrap' }}>{fmtTgl(it.tanggal)}</td>
                           <td style={{ padding: '.6rem .5rem', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.problem}>
                             {it.problem || '-'}
@@ -323,28 +336,29 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
                           <td style={{ padding: '.6rem .5rem', whiteSpace: 'nowrap' }}>{it.pic || '-'}</td>
                           <td style={{ padding: '.6rem .5rem', whiteSpace: 'nowrap' }}>{fmtTgl(it.targetDate)}</td>
                           <td style={{ padding: '.6rem .5rem' }}>
-                            <span style={{ padding: '.2rem .55rem', borderRadius: 999, fontSize: '.72rem', fontWeight: 600,
-                              background: `${warnaStatus(it.status)}1F`, color: warnaStatus(it.status), whiteSpace: 'nowrap' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.3rem', padding: '.2rem .55rem', borderRadius: 999,
+                              fontSize: '.72rem', fontWeight: 600, background: n.bg, color: n.teks, border: `1px solid ${n.garis}`, whiteSpace: 'nowrap' }}>
+                              <IkonSt size={12} aria-hidden="true" />
                               {it.status || '-'}
                             </span>
                           </td>
                           <td style={{ padding: '.6rem .5rem', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                             title={it.latestWeek ? `${it.latestWeek}: ${it.latestNote}` : ''}>
                             {it.latestWeek
-                              ? <><span style={{ color: '#60A5FA', fontWeight: 600 }}>{it.latestWeek}:</span> {it.latestNote}</>
-                              : <span style={{ color: 'var(--txt-muted)' }}>-</span>}
+                              ? <><span style={{ color: NADA.info.teks, fontWeight: 600 }}>{it.latestWeek}:</span> {it.latestNote}</>
+                              : <span style={{ color: 'var(--wr-txt-muted)' }}>-</span>}
                           </td>
                         </tr>
 
                         {buka && (
-                          <tr style={{ background: 'rgba(255,255,255,.02)' }}>
+                          <tr style={{ background: 'var(--wr-zebra)' }}>
                             <td />
                             <td colSpan={7} style={{ padding: '.9rem 1rem 1.1rem 1.6rem' }}>
-                              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1fr) minmax(260px, 1.2fr)', gap: '1.5rem' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '1.5rem' }}>
                                 <div style={{ display: 'grid', gap: '.7rem', alignContent: 'start' }}>
                                   {it.identifikasi && (
                                     <div>
-                                      <div style={{ fontSize: '.68rem', fontWeight: 700, color: 'var(--txt-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '.25rem' }}>
+                                      <div style={{ fontSize: '.68rem', fontWeight: 700, color: 'var(--wr-txt-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '.25rem' }}>
                                         Identification
                                       </div>
                                       <div style={{ fontSize: '.78rem' }}>{it.identifikasi}</div>
@@ -352,7 +366,7 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
                                   )}
                                   {it.deskripsi && (
                                     <div>
-                                      <div style={{ fontSize: '.68rem', fontWeight: 700, color: 'var(--txt-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '.25rem' }}>
+                                      <div style={{ fontSize: '.68rem', fontWeight: 700, color: 'var(--wr-txt-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '.25rem' }}>
                                         Description
                                       </div>
                                       <div style={{ fontSize: '.78rem', lineHeight: 1.6 }}>
@@ -364,17 +378,17 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
 
                                 {rentang.length > 0 && (
                                   <div>
-                                    <div style={{ fontSize: '.68rem', fontWeight: 700, color: 'var(--txt-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '.4rem', display: 'flex', alignItems: 'center', gap: '.35rem' }}>
+                                    <div style={{ fontSize: '.68rem', fontWeight: 700, color: 'var(--wr-txt-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '.4rem', display: 'flex', alignItems: 'center', gap: '.35rem' }}>
                                       <ListChecks size={13} /> Riwayat Mingguan ({rentang.length} perubahan dari {it.updates.length} minggu tercatat)
                                     </div>
                                     <div style={{ display: 'grid', gap: '.5rem', maxHeight: 320, overflowY: 'auto', paddingRight: '.4rem' }}>
                                       {rentang.map((r, i) => (
                                         <div key={i} style={{ display: 'flex', gap: '.6rem', fontSize: '.78rem', paddingBottom: '.45rem',
-                                          borderBottom: i < rentang.length - 1 ? '1px solid rgba(255,255,255,.06)' : 'none' }}>
-                                          <span style={{ color: '#60A5FA', fontWeight: 600, minWidth: 96, flexShrink: 0 }}>
+                                          borderBottom: i < rentang.length - 1 ? '1px solid var(--wr-line)' : 'none' }}>
+                                          <span style={{ color: NADA.info.teks, fontWeight: 600, minWidth: 96, flexShrink: 0 }}>
                                             {r.dariMinggu === r.sampaiMinggu ? r.dariMinggu : `${r.dariMinggu} – ${r.sampaiMinggu}`}
                                           </span>
-                                          <div style={{ color: 'var(--txt-muted)', lineHeight: 1.6 }}>
+                                          <div style={{ color: 'var(--txt-secondary)', lineHeight: 1.6 }}>
                                             <TeksAtauDaftar teks={r.catatan} />
                                           </div>
                                         </div>
@@ -390,14 +404,14 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
                     );
                   })}
                   {!ditampilkan.length && (
-                    <tr><td colSpan={8} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--txt-muted)', fontSize: '.8rem' }}>
+                    <tr><td colSpan={8} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)', fontSize: '.8rem' }}>
                       Tidak ada isu yang cocok dengan filter/pencarian.
                     </td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '.7rem 1rem', fontSize: '.75rem', color: 'var(--txt-muted)', borderTop: '1px solid rgba(255,255,255,.06)' }}>
+            <div style={{ padding: '.7rem 1rem', fontSize: '.75rem', color: 'var(--wr-txt-muted)', borderTop: '1px solid var(--wr-line)' }}>
               {ditampilkan.length} dari {items.length} isu ditampilkan. Klik baris untuk lihat Identification, Description lengkap, dan riwayat mingguan.
             </div>
           </div>

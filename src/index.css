@@ -156,6 +156,63 @@
   /* ── Status accents (theme-aware) */
   --status-danger: #F87171;
   --status-danger-bg: rgba(248, 113, 113, 0.12);
+
+  /* ═══ Laporan Mingguan (WeeklyReportView) — token warna data & UI ═══════
+     Struktur mengikuti Radix Colors: latar (1-2) → komponen (3-5) →
+     border (6-8) → solid (9-10) → teks (11-12).
+       --wr-X          solid / fill & stroke grafik      (≈ step 9)  ≥3:1
+       --wr-X-text     teks & ikon kecil di atas latar   (≈ step 11) ≥4.5:1
+       --wr-X-bg       latar badge/chip/KPI, alpha 10-12% (≈ step 3)
+       --wr-X-border   border badge/chip, alpha 30%      (≈ step 7)
+     Dark: L≈.72-.77, chroma dikurangi agar tidak bergetar di latar gelap. */
+  --wr-in: #00D084;     --wr-in-text: #00D084;
+  --wr-in-bg: rgba(0, 208, 132, 0.12);     --wr-in-border: rgba(0, 208, 132, 0.30);
+  --wr-out: #6AAAF0;    --wr-out-text: #6AAAF0;
+  --wr-out-bg: rgba(106, 170, 240, 0.12);  --wr-out-border: rgba(106, 170, 240, 0.30);
+  --wr-aset: #B794F4;   --wr-aset-text: #B794F4;
+  --wr-aset-bg: rgba(183, 148, 244, 0.12); --wr-aset-border: rgba(183, 148, 244, 0.30);
+  --wr-warn: #E0A84D;   --wr-warn-text: #E0A84D;
+  --wr-warn-bg: rgba(224, 168, 77, 0.12);  --wr-warn-border: rgba(224, 168, 77, 0.30);
+  --wr-info: #4FC3D9;   --wr-info-text: #4FC3D9;
+  --wr-info-bg: rgba(79, 195, 217, 0.12);  --wr-info-border: rgba(79, 195, 217, 0.30);
+  /* Seri tambahan untuk chart >5 kategori (vendor/kategori aset) */
+  --wr-c6: #EA91BC;
+  --wr-c7: #EF996C;
+  --wr-c8: #A0BE66;
+  --wr-neutral: #8A9AB2;
+  --wr-neutral-text: #8A9AB2;
+  --wr-neutral-bg: rgba(138, 154, 178, 0.12);  --wr-neutral-border: rgba(138, 154, 178, 0.30);
+  /* Negatif sungguhan (di bawah target / gagal) — bukan kategori */
+  --wr-neg: #F28881;    --wr-neg-text: #F28881;
+  --wr-neg-bg: rgba(242, 136, 129, 0.12);  --wr-neg-border: rgba(242, 136, 129, 0.30);
+  --wr-on-in: #06281A;
+
+  /* Netral: teks, tabel, kontrol, chart */
+  --wr-txt-muted: var(--txt-tertiary);
+  --wr-line: rgba(255, 255, 255, 0.10);
+  --wr-th-bg: #0F1829;
+  --wr-zebra: rgba(255, 255, 255, 0.025);
+  --wr-row-hover: rgba(255, 255, 255, 0.055);
+  --wr-row-selected: rgba(0, 208, 132, 0.12);
+  --wr-field-bg: rgba(255, 255, 255, 0.05);
+  --wr-field-border: #6B7C95;
+  --wr-field-border-hover: #94A3B8;
+  --wr-btn-bg: rgba(255, 255, 255, 0.06);
+  --wr-btn-bg-hover: rgba(255, 255, 255, 0.11);
+  --wr-tab-bg: rgba(255, 255, 255, 0.04);
+  --wr-grid: rgba(255, 255, 255, 0.08);
+  --wr-cursor: rgba(255, 255, 255, 0.35);
+  --wr-cursor-fill: rgba(255, 255, 255, 0.06);
+  --wr-seg-gap: #111827;
+  --wr-tooltip-bg: #0C1220;
+  --wr-tooltip-border: #2B3B57;
+  --wr-tooltip-shadow: none;
+  --wr-focus: #00D084;
+  /* Popup <select> native: HARUS warna opaque — rgba tergambar di atas kanvas
+     putih bawaan browser sehingga opsi terpilih jadi pucat & tak terbaca. */
+  --wr-option-bg: #111827;
+  --wr-option-hover-bg: #222836;
+  --wr-option-selected-bg: #0E3938;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -201,6 +258,54 @@ html[data-theme='light'] {
   --chip-danger-bg: rgba(220, 38, 38, 0.08);
   --chip-danger-border: rgba(220, 38, 38, 0.25);
   --chip-danger-text: #DC2626;
+
+  /* ── Laporan Mingguan: token warna data & UI (lihat penjelasan di :root).
+     Light: fill L≈.55-.62 (≥3:1); varian -text lebih gelap agar teks/badge
+     lolos 4.5:1 di atas latar tint. INFO digeser ke cyan-teal supaya tidak
+     tertukar dengan OUT yang juga biru. */
+  --wr-in: #008754;     --wr-in-text: #006E3D;
+  --wr-in-bg: rgba(0, 135, 84, 0.10);      --wr-in-border: rgba(0, 135, 84, 0.30);
+  --wr-out: #1A6FD2;    --wr-out-text: #005CBE;
+  --wr-out-bg: rgba(26, 111, 210, 0.10);   --wr-out-border: rgba(26, 111, 210, 0.30);
+  --wr-aset: #6929C4;   --wr-aset-text: #6929C4;
+  --wr-aset-bg: rgba(105, 41, 196, 0.10);  --wr-aset-border: rgba(105, 41, 196, 0.30);
+  --wr-warn: #B86E00;   --wr-warn-text: #944D00;
+  --wr-warn-bg: rgba(184, 110, 0, 0.10);   --wr-warn-border: rgba(184, 110, 0, 0.30);
+  --wr-info: #0090A9;   --wr-info-text: #006B81;
+  --wr-info-bg: rgba(0, 144, 169, 0.10);   --wr-info-border: rgba(0, 144, 169, 0.30);
+  --wr-c6: #C65B93;
+  --wr-c7: #CC6526;
+  --wr-c8: #6F920D;
+  --wr-neutral: #5E6F7E;
+  --wr-neutral-text: #536472;
+  --wr-neutral-bg: rgba(94, 111, 126, 0.10);   --wr-neutral-border: rgba(94, 111, 126, 0.30);
+  --wr-neg: #D24D45;    --wr-neg-text: #AE342E;
+  --wr-neg-bg: rgba(210, 77, 69, 0.10);    --wr-neg-border: rgba(210, 77, 69, 0.30);
+  --wr-on-in: #FFFFFF;
+
+  --wr-txt-muted: var(--txt-tertiary);
+  --wr-line: rgba(22, 60, 45, 0.14);
+  --wr-th-bg: #EDF3EF;
+  --wr-zebra: rgba(22, 60, 45, 0.035);
+  --wr-row-hover: rgba(0, 135, 84, 0.07);
+  --wr-row-selected: rgba(0, 135, 84, 0.13);
+  --wr-field-bg: #FFFFFF;
+  --wr-field-border: #6F8378;
+  --wr-field-border-hover: #3A4A42;
+  --wr-btn-bg: #F4F9F5;
+  --wr-btn-bg-hover: #E6F0E9;
+  --wr-tab-bg: rgba(22, 60, 45, 0.04);
+  --wr-grid: rgba(22, 60, 45, 0.12);
+  --wr-cursor: rgba(22, 60, 45, 0.40);
+  --wr-cursor-fill: rgba(0, 135, 84, 0.08);
+  --wr-seg-gap: #FFFFFF;
+  --wr-tooltip-bg: #FFFFFF;
+  --wr-tooltip-border: #B9CCC0;
+  --wr-tooltip-shadow: 0 8px 24px rgba(15, 40, 30, 0.12);
+  --wr-focus: #008754;
+  --wr-option-bg: #FFFFFF;
+  --wr-option-hover-bg: #EBF5F1;
+  --wr-option-selected-bg: #DBEEE7;
 }
 
 /* Flat cards need a touch of elevation on a light background — dark mode

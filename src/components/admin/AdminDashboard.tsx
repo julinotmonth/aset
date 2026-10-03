@@ -4,6 +4,7 @@ import {
   Plus,
   Search,
   Activity,
+  CalendarDays,
   Package,
   AlertTriangle,
   DollarSign,
@@ -31,6 +32,9 @@ import { AddEditSparePartModal } from './AddEditSparePartModal';
 import { UserFormModal } from './UserFormModal';
 import { AdminAnalytics } from './AdminAnalytics';
 import { Sidebar, type AdminView } from './Sidebar';
+import { MENU_AWAL, menuTerbuka } from './menuAkses';
+import { usePerubahanLaporan, waktuMs } from './weeklyChanges';
+import { NotifPerubahanLaporan } from './NotifPerubahanLaporan';
 import { WeeklyReportView } from './WeeklyReportView';
 import {
   GlobalSearchView,
@@ -61,7 +65,10 @@ const THEME_KEY = 'reethau_admin_theme';
 const NOTIF_READ_KEY = 'reethau_notif_last_read';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, onGoToPublicSite, onUpdateAuth }) => {
-  const [activeView, setActiveView] = useState<AdminView>('dashboard');
+  const [activeView, setActiveViewRaw] = useState<AdminView>(MENU_AWAL);
+  // Satu-satunya jalan pindah menu (sidebar, Global Search, notifikasi): menu
+  // yang terkunci diabaikan di sini, jadi tidak ada jalur yang bisa membukanya.
+  const setActiveView = (view: AdminView) => { if (menuTerbuka(view)) setActiveViewRaw(view); };
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   // ── Theme (dark / light) ────────────────────────────────────────────────
@@ -214,22 +221,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   const [editingItem, setEditingItem] = useState<SparePart | null>(null);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const [transferringItem, setTransferringItem] = useState<SparePart | null>(null);
-  const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // ── Notifications ────────────────────────────────────────────────────────
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [lastReadAt, setLastReadAt] = useState<number>(() => Number(localStorage.getItem(NOTIF_READ_KEY) || 0));
   const previousReadAtRef = useRef(lastReadAt);
+  // Perubahan data Laporan Mingguan (nama PIC) — diisi server saat sinkronisasi sheet.
+  const perubahan = usePerubahanLaporan();
 
   const sortedLogs = useMemo(
     () => [...logs].sort((a, b) => (parseLogDate(b.timestamp)?.getTime() ?? 0) - (parseLogDate(a.timestamp)?.getTime() ?? 0)),
     [logs]
   );
-  const unreadCount = useMemo(
-    () => sortedLogs.filter((l) => (parseLogDate(l.timestamp)?.getTime() ?? 0) > lastReadAt).length,
+  const unreadPerubahan = useMemo(
+    () => perubahan.items.filter((c) => waktuMs(c.createdAt) > lastReadAt).length,
+    [perubahan.items, lastReadAt]
+  );
+  // Log aktivitas spare part hanya dihitung bila menu Audit terbuka (saat ini terkunci).
+  const unreadLogs = useMemo(
+    () => (menuTerbuka('audit') ? sortedLogs.filter((l) => (parseLogDate(l.timestamp)?.getTime() ?? 0) > lastReadAt).length : 0),
     [sortedLogs, lastReadAt]
   );
+  const unreadCount = unreadPerubahan + unreadLogs;
   const attentionItems = useMemo(
     () => spareParts.filter((p) => p.status === 'Critical' || p.status === 'Maintenance Needed'),
     [spareParts]
@@ -560,7 +574,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
             </button>
 
             <button
-              onClick={toggleNotif}
+              onClick={() => { toggleNotif(); if (!isNotifOpen) void perubahan.muatUlang(); }}
               className="btn-chip notif-bell-btn"
               title="Notifikasi"
               aria-label="Notifikasi"
@@ -569,14 +583,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
               {unreadCount > 0 && (
                 <span className="notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
               )}
-            </button>
-
-            <button
-              onClick={() => setIsLogsOpen(!isLogsOpen)}
-              className="btn-chip"
-            >
-              <Activity size={16} color="#00D084" />
-              <span className="label-text">Log ({logs.length})</span>
             </button>
 
             <button
@@ -832,6 +838,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
             </div>
 
             <div className="notif-popover-body">
+              {/* Perubahan data Laporan Mingguan — lengkap dengan nama PIC */}
+              <div className="notif-section-title">
+                <CalendarDays size={13} />
+                Perubahan Laporan Mingguan
+              </div>
+              <NotifPerubahanLaporan
+                items={perubahan.items}
+                memuat={perubahan.memuat}
+                error={perubahan.error}
+                bacaSebelumnya={previousReadAtRef.current}
+              />
+
+              {/* Bagian di bawah memakai data modul yang saat ini terkunci — tampil lagi otomatis saat menunya dibuka. */}
+              {menuTerbuka('maintenance') && (<>
               {/* Needs attention */}
               <div className="notif-section-title">
                 <AlertOctagon size={13} />
@@ -870,6 +890,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
                 </>
               )}
 
+              </>)}
+
+              {menuTerbuka('audit') && (<>
               {/* Recent activity */}
               <div className="notif-section-title">
                 <Activity size={13} />
@@ -904,64 +927,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
                 Lihat Semua Log Aktivitas
                 <ArrowRight size={13} />
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Activity Logs Drawer */}
-      {isLogsOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 90,
-            background: 'rgba(5, 8, 16, 0.6)',
-            display: 'flex',
-            justifyContent: 'flex-end',
-          }}
-          onClick={(e) => { if (e.target === e.currentTarget) setIsLogsOpen(false); }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: '450px',
-              height: '100vh',
-              background: 'var(--bg-surface)',
-              borderLeft: '1px solid var(--border-subtle)',
-              padding: '2rem',
-              overflowY: 'auto',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--txt-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Activity size={20} color="#00D084" />
-                Riwayat Log Aktivitas
-              </h3>
-              <button onClick={() => setIsLogsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--txt-tertiary)', cursor: 'pointer' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {logs.map((log) => (
-                <div
-                  key={log.id}
-                  style={{
-                    background: 'var(--bg-root)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: '12px',
-                    padding: '1rem',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#00D084', fontWeight: 700 }}>
-                    <span>{log.action}</span>
-                    <span style={{ color: 'var(--txt-muted)' }}>{log.timestamp}</span>
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--txt-primary)', marginTop: '0.4rem', fontWeight: 500 }}>{log.description}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--txt-muted)', marginTop: '0.5rem' }}>Oleh: {log.performedBy}</div>
-                </div>
-              ))}
+              </>)}
             </div>
           </div>
         </div>
