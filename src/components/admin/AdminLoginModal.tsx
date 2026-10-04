@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Lock, Mail, ArrowRight, Loader2 } from 'lucide-react';
+import { X, Lock, Mail, ArrowRight, Loader2, Eye, EyeOff, ShieldCheck, AlertCircle } from 'lucide-react';
 import type { AuthState } from '../../types';
 import { api, setToken } from '../../lib/api';
 
@@ -23,18 +23,51 @@ interface LoginResponse {
   };
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
-  const [email, setEmail] = useState('admin@reethau.com');
-  const [password, setPassword] = useState('reethau123');
+  // Sengaja dikosongkan: tidak ada kredensial bawaan di bundle frontend.
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
+  const [touched, setTouched] = useState({ email: false, password: false });
   const [error, setError] = useState('');
+  const [shake, setShake] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  // Fokus ke email saat dibuka, tutup dengan Esc, dan kunci scroll halaman.
+  useEffect(() => {
+    if (!isOpen) return;
+    const t = window.setTimeout(() => emailRef.current?.focus(), 80);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !isLoading) onClose(); };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [isOpen, isLoading, onClose]);
 
   if (!isOpen) return null;
 
+  const emailInvalid = touched.email && !EMAIL_RE.test(email.trim());
+  const passwordInvalid = touched.password && password.length === 0;
+
+  const fail = (msg: string) => {
+    setError(msg);
+    setShake(true);
+    window.setTimeout(() => setShake(false), 450);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError('Email dan password wajib diisi');
+    setTouched({ email: true, password: true });
+    if (!EMAIL_RE.test(email.trim()) || !password) {
+      fail('Lengkapi email yang valid dan kata sandi Anda.');
       return;
     }
 
@@ -54,151 +87,100 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
       });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal login. Coba lagi.');
+      setPassword('');
+      fail(err instanceof Error ? err.message : 'Gagal login. Coba lagi.');
     } finally {
       setIsLoading(false);
     }
   };
 
   return createPortal(
-    <div className="admin-modal-overlay">
+    <div
+      className="admin-modal-overlay"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !isLoading) onClose(); }}
+    >
       <div
-        className="glass-panel admin-modal-panel"
-        style={{
-          maxWidth: '460px',
-          boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-        }}
+        className={`glass-panel admin-modal-panel login-panel${shake ? ' login-shake' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="login-title"
+        style={{ maxWidth: '440px', boxShadow: '0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,208,132,0.08)' }}
       >
-        <button
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: '1.25rem',
-            right: '1.25rem',
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: 'none',
-            color: '#94A3B8',
-            borderRadius: '50%',
-            width: '32px',
-            height: '32px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
+        <button type="button" onClick={onClose} className="login-close" aria-label="Tutup">
           <X size={18} />
         </button>
 
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div
-            style={{
-              width: '64px',
-              height: '64px',
-              borderRadius: '18px',
-              background: 'rgba(0, 208, 132, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 1rem auto',
-              padding: '10px',
-            }}
-          >
-            <img
-              src="/assets/images/logo-icon.png"
-              alt="Logo Reethau"
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-            />
-          </div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#FFFFFF' }}>Portal Admin Reethau</h2>
-          <p style={{ color: '#94A3B8', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-            Manajemen Inventaris & Spare Part Multi-Site
-          </p>
+        <div className="login-brand">
+          <img src="/assets/images/logo-white.webp" alt="Reethau Clean Energy" className="login-logo" />
+          <div className="login-divider" aria-hidden="true" />
+          <h2 id="login-title" className="login-title">Portal Admin</h2>
+          <p className="login-subtitle">Manajemen Inventaris &amp; Aset Multi-Site</p>
         </div>
 
-        {error && (
-          <div
-            style={{
-              background: 'rgba(239, 68, 68, 0.15)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: '#FCA5A5',
-              padding: '0.75rem',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              marginBottom: '1.25rem',
-            }}
-          >
-            {error}
-          </div>
-        )}
+        <div className={`login-error${error ? ' show' : ''}`} role="alert" aria-live="assertive">
+          {error && (
+            <>
+              <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
+              <span>{error}</span>
+            </>
+          )}
+        </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <form onSubmit={handleSubmit} noValidate className="login-form">
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', color: '#94A3B8', marginBottom: '0.4rem', fontWeight: 600 }}>
-              Email Akun Admin
-            </label>
-            <div style={{ position: 'relative' }}>
-              <Mail size={18} color="#64748B" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)' }} />
+            <label htmlFor="login-email" className="login-label">Email</label>
+            <div className={`login-field${emailInvalid ? ' invalid' : ''}`}>
+              <Mail size={18} className="login-field-icon" />
               <input
+                id="login-email"
+                ref={emailRef}
                 type="email"
+                inputMode="email"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'rgba(10, 15, 29, 0.8)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '10px',
-                  padding: '0.75rem 1rem 0.75rem 2.75rem',
-                  color: '#FFFFFF',
-                  fontSize: '0.95rem',
-                  outline: 'none',
-                }}
-                placeholder="nama@reethau.com"
+                onChange={(e) => { setEmail(e.target.value); if (error) setError(''); }}
+                onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+                placeholder="nama@perusahaan.com"
+                aria-invalid={emailInvalid}
+                disabled={isLoading}
               />
             </div>
-            <p style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '0.4rem' }}>
-              Coba: admin@reethau.com, hendra.gunawan@reethau.com, atau budi.santoso@reethau.com
-            </p>
+            {emailInvalid && <p className="login-hint-error">Format email belum benar.</p>}
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', color: '#94A3B8', marginBottom: '0.4rem', fontWeight: 600 }}>
-              Kata Sandi
-            </label>
-            <div style={{ position: 'relative' }}>
-              <Lock size={18} color="#64748B" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)' }} />
+            <label htmlFor="login-password" className="login-label">Kata Sandi</label>
+            <div className={`login-field${passwordInvalid ? ' invalid' : ''}`}>
+              <Lock size={18} className="login-field-icon" />
               <input
-                type="password"
+                id="login-password"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'rgba(10, 15, 29, 0.8)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '10px',
-                  padding: '0.75rem 1rem 0.75rem 2.75rem',
-                  color: '#FFFFFF',
-                  fontSize: '0.95rem',
-                  outline: 'none',
-                }}
+                onChange={(e) => { setPassword(e.target.value); if (error) setError(''); }}
+                onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+                onKeyUp={(e) => setCapsLock(e.getModifierState?.('CapsLock') ?? false)}
+                placeholder="Masukkan kata sandi"
+                aria-invalid={passwordInvalid}
+                disabled={isLoading}
               />
+              <button
+                type="button"
+                className="login-eye"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
+            {capsLock && <p className="login-hint-warn">Caps Lock sedang aktif.</p>}
+            {passwordInvalid && <p className="login-hint-error">Kata sandi wajib diisi.</p>}
           </div>
 
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={isLoading}
-            style={{
-              width: '100%',
-              justifyContent: 'center',
-              padding: '0.85rem',
-              fontSize: '1rem',
-              marginTop: '0.5rem',
-              opacity: isLoading ? 0.7 : 1,
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-            }}
-          >
+          <button type="submit" className="btn-primary login-submit" disabled={isLoading}>
             {isLoading ? (
               <>
                 <Loader2 size={18} className="spin-icon" />
@@ -207,14 +189,15 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
             ) : (
               <>
                 Masuk ke Dashboard
-                <ArrowRight size={18} />
+                <ArrowRight size={18} className="login-arrow" />
               </>
             )}
           </button>
         </form>
 
-        <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.75rem', color: '#64748B' }}>
-          Akun Demo: <code>admin@reethau.com</code> | Pass: <code>reethau123</code>
+        <div className="login-footer">
+          <ShieldCheck size={14} />
+          <span>Akses khusus karyawan Reethau. Aktivitas login dicatat.</span>
         </div>
       </div>
     </div>,

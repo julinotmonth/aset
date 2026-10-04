@@ -173,9 +173,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
 
   const handleAddUser = async (data: Partial<AppUser>) => {
     try {
-      const newUser = await api.post<AppUser>('/users', data);
+      const { temporaryPassword, ...newUser } = await api.post<AppUser & { temporaryPassword?: string }>('/users', data);
       setUsers((prev) => [...prev, newUser]);
       showToast(`Akun ${newUser.name} berhasil ditambahkan.`);
+      // Password sementara acak hanya dikirim sekali oleh server — tampilkan agar bisa disalin.
+      if (temporaryPassword) {
+        window.alert(`Akun dibuat untuk ${newUser.email}\n\nPassword sementara (hanya tampil sekali, salin sekarang):\n${temporaryPassword}`);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Gagal menambah akun.');
     }
