@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { MapPin, Mail, Phone, Lock, ArrowUpRight, QrCode } from 'lucide-react';
 import { useScrollReveal } from '../../hooks/useScrollReveal';
+import { PUBLIC_SITES } from '../../data/publicSites';
 
 interface FooterProps { onOpenAdminLogin: () => void; }
 
@@ -23,24 +24,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
       .catch(() => setQrDataUrl(null));
   }, []);
 
-  const sites = [
-    {
-      name: 'Site Bekasi (Mother Station)',
-      detail: 'Kawasan Industri Bekasi, Jawa Barat. Pusat Kompresi Utama CNG.',
-    },
-    {
-      name: 'Site Indramayu (Daughter Station)',
-      detail: 'Depo Kriogenik LNG & Stasiun Regasifikasi.',
-    },
-    {
-      name: 'Site Blora (Wellhead & Biomass)',
-      detail: 'Fasilitas Ekstraksi Gas Sumur & Woodchip Processing.',
-    },
-    {
-      name: 'Site Setu (Compressor Station)',
-      detail: 'Fleet Room & Stasiun Kompresi CNG, Setu, Bekasi.',
-    },
-  ];
+  const sites = PUBLIC_SITES.map((x) => ({ name: x.footerName, detail: x.footerDetail }));
 
   const footerLinks = ['Kebijakan Privasi', 'Syarat & Ketentuan', 'Sertifikasi HSE'];
 

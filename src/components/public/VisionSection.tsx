@@ -2,11 +2,12 @@ import React, { useState, useRef } from 'react';
 import { Leaf, Factory, Truck, MapPin, X, Eye, ShieldCheck } from 'lucide-react';
 import type { Language } from '../../types';
 import { useScrollReveal } from '../../hooks/useScrollReveal';
+import { PUBLIC_SITES, getPublicSite, type PublicSiteKey } from '../../data/publicSites';
 
 interface VisionSectionProps { lang: Language; }
 
 export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
-  const [activeSite, setActiveSite] = useState<'Bekasi' | 'Indramayu' | 'Blora'>('Bekasi');
+  const [activeSite, setActiveSite] = useState<PublicSiteKey>('setu');
   const [selectedImage, setSelectedImage] = useState<{ src: string; caption: string; desc: string } | null>(null);
   const [hoveredCard, setHoveredCard] = useState<number | null>(null);
   const [hoveredGallery, setHoveredGallery] = useState<number | null>(null);
@@ -14,42 +15,6 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
   const sectionRef = useRef<HTMLElement>(null);
 
   useScrollReveal(sectionRef, '.reveal-item', [lang]);
-
-  const siteDetails = {
-    Bekasi: {
-      title: 'Mother Station CNG Bekasi',
-      role: 'Pusat Kompresi & Distribusi Utama JABODETABEK',
-      desc: 'Fasilitas Mother Station berkapasitas kompresi tinggi yang menyalurkan gas alam terkompresi (CNG) ke berbagai kawasan industri manufaktur di Jawa Barat dan sekitarnya.',
-      capacity: '3.5 MMSCFD',
-      activeSpareParts: 142,
-      image: '/assets/images/gallery-5.webp',
-      features: ['24/7 High-pressure Compression', 'Dedicated Workshop & Test Bench', 'Real-time Telemetry Control Room'],
-      statusColor: '#00D084',
-      statusLabel: 'OPERATIONAL',
-    },
-    Indramayu: {
-      title: 'Daughter Station & LNG Depot Indramayu',
-      role: 'Hub De-kompresi & Depo Kriosfer LNG',
-      desc: 'Stasiun penerimaan dan penurunan tekanan gas serta penyimpanan LNG berteknologi tinggi untuk mendukung efisiensi energi pabrik semen, keramik, dan tekstil.',
-      capacity: '2.0 MMSCFD + Cryogenic',
-      activeSpareParts: 98,
-      image: '/assets/images/lng-storage.webp',
-      features: ['Regasification Unit', 'Cryogenic Tanker Fleet Terminal', 'Automated Safety Pressure Valves'],
-      statusColor: '#60A5FA',
-      statusLabel: 'ACTIVE',
-    },
-    Blora: {
-      title: 'Wellhead & Biomass Facility Blora',
-      role: 'Sumur Gas Alam & Pabrik Pengolahan Biomassa',
-      desc: 'Pusat ekstrasi sumur gas alam dan pengolahan limbah kayu menjadi woodchip dan biomassa terbarukan berkadar air rendah (<20%) dengan standar netral karbon.',
-      capacity: '500 Tons Biomass/Mo + Gas',
-      activeSpareParts: 85,
-      image: '/assets/images/biomass.webp',
-      features: ['Woodchip Drying & Sizing Line', 'Raw Gas Pre-treatment', 'Biomass Quality Control Lab'],
-      statusColor: '#34D399',
-      statusLabel: 'PRODUCTION',
-    },
-  };
 
   const galleryImages = [
     { src: '/assets/images/cng-cylinder.webp', caption: 'CNG Cylinder Storage', desc: 'Tabung gas alam bertekanan tinggi 250 Bar bersertifikasi uji tekan.' },
@@ -101,13 +66,7 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
     <Truck size={26} strokeWidth={2} />,
   ];
 
-  const currentSite = siteDetails[activeSite];
-
-  const statusStrip: { key: 'Bekasi' | 'Indramayu' | 'Blora'; status: string }[] = [
-    { key: 'Bekasi', status: lang === 'IDN' ? '24/7 Pasokan Aktif' : '24/7 Active Supply' },
-    { key: 'Indramayu', status: lang === 'IDN' ? 'Stasiun Tekanan Tinggi' : 'High Pressure Station' },
-    { key: 'Blora', status: lang === 'IDN' ? 'Feedstock Aktif' : 'Feedstock Active' },
-  ];
+  const currentSite = getPublicSite(activeSite);
 
   return (
     <section
@@ -143,8 +102,8 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
             {c.sitesLabel}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0.75rem' }}>
-            {statusStrip.map((s, i) => {
-              const detail = siteDetails[s.key];
+            {PUBLIC_SITES.map((s, i) => {
+              const detail = s;
               const isActive = activeSite === s.key;
               const isHovered = hoveredStatus === i;
               return (
@@ -167,22 +126,22 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
                   <div style={{
                     width: '34px', height: '34px', flexShrink: 0,
                     borderRadius: '9px',
-                    background: 'rgba(0,208,132,0.1)',
-                    border: '1px solid rgba(0,208,132,0.3)',
+                    background: `${detail.color}1A`,
+                    border: `1px solid ${detail.color}4D`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#00D084',
+                    color: detail.color,
                   }}>
                     <MapPin size={16} strokeWidth={2} />
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#FFFFFF' }}>Site {s.key}</div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#FFFFFF' }}>{detail.label}</div>
                     <div style={{ fontSize: '0.7rem', color: '#94A3B8' }}>{detail.role}</div>
-                    <div style={{ fontSize: '0.66rem', color: detail.statusColor, fontWeight: 700, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <div style={{ fontSize: '0.66rem', color: detail.color, fontWeight: 700, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{
-                        width: '6px', height: '6px', borderRadius: '50%', background: detail.statusColor, display: 'inline-block',
+                        width: '6px', height: '6px', borderRadius: '50%', background: detail.color, display: 'inline-block',
                         animation: 'pulseGlow 1.8s ease-in-out infinite',
                       }} />
-                      {s.status}
+                      {s.status[lang]}
                     </div>
                   </div>
                 </button>
@@ -255,7 +214,7 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
               borderRadius: '9999px', border: '1px solid rgba(255,255,255,0.07)',
               maxWidth: '100%', overflowX: 'auto',
             }}>
-              {(['Bekasi', 'Indramayu', 'Blora'] as const).map(site => (
+              {PUBLIC_SITES.map(({ key: site, short }) => (
                 <button
                   key={site}
                   onClick={() => setActiveSite(site)}
@@ -273,7 +232,7 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
                     boxShadow: activeSite === site ? '0 0 16px rgba(0,208,132,0.5)' : 'none',
                   }}
                 >
-                  {site}
+                  {short}
                 </button>
               ))}
             </div>
@@ -293,17 +252,23 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
                 {currentSite.desc}
               </p>
 
-              {/* Stats */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '0.9rem', marginBottom: '1.5rem' }}>
-                <div style={{ background: 'rgba(0,208,132,0.08)', border: '1px solid rgba(0,208,132,0.25)', borderRadius: '12px', padding: '1rem' }}>
-                  <div style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Kapasitas Operasional</div>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#00D084', marginTop: '4px' }}>{currentSite.capacity}</div>
+              {/* Stats — hanya tampil bila datanya ada */}
+              {(currentSite.capacity || currentSite.activeSpareParts !== undefined) && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(0, 1fr))', gridAutoFlow: 'column', gap: '0.9rem', marginBottom: '1.5rem' }}>
+                  {currentSite.capacity && (
+                    <div style={{ background: 'rgba(0,208,132,0.08)', border: '1px solid rgba(0,208,132,0.25)', borderRadius: '12px', padding: '1rem' }}>
+                      <div style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Kapasitas Operasional</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#00D084', marginTop: '4px' }}>{currentSite.capacity}</div>
+                    </div>
+                  )}
+                  {currentSite.activeSpareParts !== undefined && (
+                    <div style={{ background: 'rgba(96,165,250,0.07)', border: '1px solid rgba(96,165,250,0.25)', borderRadius: '12px', padding: '1rem' }}>
+                      <div style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Spare Part MS Active</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#60A5FA', marginTop: '4px' }}>{currentSite.activeSpareParts} Items</div>
+                    </div>
+                  )}
                 </div>
-                <div style={{ background: 'rgba(96,165,250,0.07)', border: '1px solid rgba(96,165,250,0.25)', borderRadius: '12px', padding: '1rem' }}>
-                  <div style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Spare Part MS Active</div>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#60A5FA', marginTop: '4px' }}>{currentSite.activeSpareParts} Items</div>
-                </div>
-              </div>
+              )}
 
               {/* Features */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
@@ -328,7 +293,7 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
               <div style={{ position: 'absolute', bottom: '1.25rem', left: '1.25rem', right: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '0.875rem' }}>{currentSite.title}</span>
                 <span style={{
-                  background: currentSite.statusColor, color: '#060C18',
+                  background: currentSite.color, color: '#060C18',
                   padding: '0.2rem 0.7rem', borderRadius: '9999px',
                   fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.06em',
                 }}>
