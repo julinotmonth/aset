@@ -88,6 +88,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
       onClose();
     } catch (err) {
       setPassword('');
+      // Password sengaja dikosongkan setelah gagal; jangan tampilkan "wajib diisi" di atas pesan error asli.
+      setTouched((t) => ({ ...t, password: false }));
       fail(err instanceof Error ? err.message : 'Gagal login. Coba lagi.');
     } finally {
       setIsLoading(false);
