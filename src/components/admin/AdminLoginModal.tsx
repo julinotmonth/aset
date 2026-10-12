@@ -23,8 +23,6 @@ interface LoginResponse {
   };
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
   // Sengaja dikosongkan: tidak ada kredensial bawaan di bundle frontend.
   const [email, setEmail] = useState('');
@@ -54,7 +52,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
 
   if (!isOpen) return null;
 
-  const emailInvalid = touched.email && !EMAIL_RE.test(email.trim());
+  const emailInvalid = touched.email && email.trim().length === 0;
   const passwordInvalid = touched.password && password.length === 0;
 
   const fail = (msg: string) => {
@@ -66,8 +64,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched({ email: true, password: true });
-    if (!EMAIL_RE.test(email.trim()) || !password) {
-      fail('Lengkapi email yang valid dan kata sandi Anda.');
+    if (!email.trim() || !password) {
+      fail('Lengkapi email/username dan kata sandi Anda.');
       return;
     }
 
@@ -130,26 +128,25 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
 
         <form onSubmit={handleSubmit} noValidate className="login-form">
           <div>
-            <label htmlFor="login-email" className="login-label">Email</label>
+            <label htmlFor="login-email" className="login-label">Email / Username</label>
             <div className={`login-field${emailInvalid ? ' invalid' : ''}`}>
               <Mail size={18} className="login-field-icon" />
               <input
                 id="login-email"
                 ref={emailRef}
-                type="email"
-                inputMode="email"
-                autoComplete="username"
+                type="text"
+                                autoComplete="username"
                 autoCapitalize="none"
                 spellCheck={false}
                 value={email}
                 onChange={(e) => { setEmail(e.target.value); if (error) setError(''); }}
                 onBlur={() => setTouched((t) => ({ ...t, email: true }))}
-                placeholder="nama@perusahaan.com"
+                placeholder="Email atau username"
                 aria-invalid={emailInvalid}
                 disabled={isLoading}
               />
             </div>
-            {emailInvalid && <p className="login-hint-error">Format email belum benar.</p>}
+            {emailInvalid && <p className="login-hint-error">Email / username wajib diisi.</p>}
           </div>
 
           <div>

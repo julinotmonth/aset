@@ -21,7 +21,7 @@ import { NADA_KELAS, IKON_KELAS, ikonSub } from './asetKlasifikasiTema';
 type BarisAset = WeeklyRow & Klasifikasi;
 import {
   RefreshCw, Upload, Link2, Download, AlertTriangle, CheckCircle2, Loader2,
-  TrendingDown, TrendingUp, Package, Boxes, ClipboardList, Target, X, PackageCheck,
+  TrendingDown, TrendingUp, Package, Boxes, ClipboardList, Target, X, PackageCheck, FileText,
 } from 'lucide-react';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -33,6 +33,7 @@ import { getSites } from '../../data/siteStore';
 import { PicaView } from './PicaView';
 import { WorkTargetView } from './WorkTargetView';
 import { MinStockView } from './MinStockView';
+import { OutstandingPrView } from './OutstandingPrView';
 
 // ── Tipe ──────────────────────────────────────────────────────────────────
 type Section = 'MAINT' | 'OH' | 'OLI' | 'LAIN' | 'ISOTANK';
@@ -258,6 +259,7 @@ export function WeeklyReportView({ auth }: Props) {
   const [picaAktif, setPicaAktif] = useState(false);
   const [workTargetAktif, setWorkTargetAktif] = useState(false);
   const [minStockAktif, setMinStockAktif] = useState(false);
+  const [osPrAktif, setOsPrAktif] = useState(false);
 
   const [rows, setRows] = useState<WeeklyRow[]>([]);
   const [volumes, setVolumes] = useState<Record<number, number>>({});
@@ -698,25 +700,27 @@ export function WeeklyReportView({ auth }: Props) {
       {/* Pemilih arah — memisahkan dua laporan yang berbeda sifatnya */}
       <div style={{ display: 'flex', gap: '.5rem', marginBottom: '.85rem', flexWrap: 'wrap' }}>
         {([
-          { id: 'OUT', label: 'Barang Keluar', ikon: TrendingDown, ...NADA.out },
+          { id: 'WORK_TARGET', label: 'Work Target / KPI', ikon: Target, ...NADA.info },
           { id: 'IN', label: 'Barang Masuk', ikon: TrendingUp, ...NADA.in },
-          { id: 'ASET', label: 'Daftar Aset', ikon: Boxes, ...NADA.aset },
+          { id: 'OUT', label: 'Barang Keluar', ikon: TrendingDown, ...NADA.out },
+          { id: 'OS_PR', label: 'Outstanding PR', ikon: FileText, ...NADA.aset },
+          { id: 'MIN_STOCK', label: 'Pencapaian Minimum Stock', ikon: PackageCheck, ...NADA.in },
+          { id: 'ASET', label: 'Asset Management', ikon: Boxes, ...NADA.aset },
           { id: 'PICA', label: 'PICA', ikon: ClipboardList, ...NADA.warn },
-          { id: 'WORK_TARGET', label: 'Work Target', ikon: Target, ...NADA.info },
-          { id: 'MIN_STOCK', label: 'Pencapaian Minimum Stok', ikon: PackageCheck, ...NADA.in },
         ] as const).map((t) => {
           const aktif = t.id === 'PICA' ? picaAktif
             : t.id === 'WORK_TARGET' ? workTargetAktif
             : t.id === 'MIN_STOCK' ? minStockAktif
-            : (!picaAktif && !workTargetAktif && !minStockAktif && arah === t.id);
+            : t.id === 'OS_PR' ? osPrAktif
+            : (!picaAktif && !workTargetAktif && !minStockAktif && !osPrAktif && arah === t.id);
           const Ikon = t.ikon;
           return (
             <button key={t.id} type="button" className="wr-tab" aria-pressed={aktif}
               onClick={() => {
-                if (t.id === 'PICA') { setPicaAktif(true); setWorkTargetAktif(false); setMinStockAktif(false); }
-                else if (t.id === 'WORK_TARGET') { setWorkTargetAktif(true); setPicaAktif(false); setMinStockAktif(false); }
-                else if (t.id === 'MIN_STOCK') { setMinStockAktif(true); setPicaAktif(false); setWorkTargetAktif(false); }
-                else { setPicaAktif(false); setWorkTargetAktif(false); setMinStockAktif(false); setArah(t.id); }
+                // Satu mode aktif pada satu waktu (PICA / Work Target / Min. Stok / Outstanding PR / data harian).
+                setPicaAktif(t.id === 'PICA'); setWorkTargetAktif(t.id === 'WORK_TARGET');
+                setMinStockAktif(t.id === 'MIN_STOCK'); setOsPrAktif(t.id === 'OS_PR');
+                if (t.id === 'OUT' || t.id === 'IN' || t.id === 'ASET') setArah(t.id);
               }}
               style={{
                 display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.55rem 1.1rem',
@@ -732,7 +736,10 @@ export function WeeklyReportView({ auth }: Props) {
       {/* Mode PICA (Problem/Identification/Corrective Action) punya bentuk data
           & panel sumber yang sama sekali beda dari Barang Masuk/Keluar/Aset —
           komponen sendiri, cuma berbagi header halaman & pemilih site. */}
-      {minStockAktif ? (
+      {osPrAktif ? (
+        // Outstanding PR: satu sheet ringkasan untuk seluruh perusahaan (per site, per kategori).
+        <OutstandingPrView auth={auth} />
+      ) : minStockAktif ? (
         // Pencapaian Minimum Stok: satu sheet untuk seluruh perusahaan (per minggu, per lokasi).
         <MinStockView auth={auth} />
       ) : workTargetAktif ? (
