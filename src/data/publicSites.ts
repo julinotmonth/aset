@@ -2,7 +2,7 @@
 //
 // Sumber kebenaran: site yang sama dengan halaman Laporan Mingguan
 // (server/src/migrate.js + server/src/weeklyReport.js):
-//   setu, indramayu (label tampilan "WS Dawuan"), blora, wunut, kht,
+//   setu, indramayu (label tampilan "WS Cibungur"), blora, wunut, kht,
 //   sangkulirang. MS Bekasi dan MS Setu adalah satu lokasi yang sama
 //   (Setu, Bekasi), jadi di halaman publik hanya ditampilkan sebagai MS Setu.
 // Halaman publik tidak login, jadi tidak bisa memanggil GET /api/sites —
@@ -56,27 +56,27 @@ export const PUBLIC_SITES: PublicSite[] = [
     footerDetail: 'Setu, Bekasi, Jawa Barat. Pusat Kompresi Utama CNG, Fleet Room & Stasiun Kompresi.',
   },
   {
-    key: 'indramayu', label: 'WS Dawuan', short: 'Dawuan', color: '#60A5FA',
-    title: 'Workshop Armada Dawuan',
+    key: 'indramayu', label: 'WS Cibungur', short: 'Cibungur', color: '#60A5FA',
+    title: 'Workshop Armada Cibungur',
     role: 'Workshop Armada Kendaraan',
     desc: 'Workshop perawatan dan perbaikan armada kendaraan Reethau, termasuk pencatatan penggunaan part dan oli untuk menjaga keandalan armada.',
     image: '/assets/images/distribution-truck.webp',
     features: ['Perawatan & Perbaikan Armada', 'Pencatatan Part Maintenance & Oli', ...FEATURES_UMUM.slice(1)],
     status: { IDN: 'Workshop Aktif', ENG: 'Workshop Active' }, statusLabel: 'ACTIVE',
-    footerName: 'WS Dawuan (Workshop Armada)',
+    footerName: 'WS Cibungur (Workshop Armada)',
     footerDetail: 'Workshop perawatan & perbaikan armada kendaraan.',
   },
   {
     key: 'blora', label: 'MS Blora', short: 'Blora', color: '#FBBF24',
-    title: 'Wellhead & Biomass Facility Blora',
-    role: 'Sumur Gas Alam & Pabrik Pengolahan Biomassa',
-    desc: 'Pusat ekstrasi sumur gas alam dan pengolahan limbah kayu menjadi woodchip dan biomassa terbarukan berkadar air rendah (<20%) dengan standar netral karbon.',
-    capacity: '500 Tons Biomass/Mo + Gas', activeSpareParts: 85,
-    image: '/assets/images/biomass.webp',
-    features: ['Woodchip Drying & Sizing Line', 'Raw Gas Pre-treatment', 'Biomass Quality Control Lab'],
-    status: { IDN: 'Feedstock Aktif', ENG: 'Feedstock Active' }, statusLabel: 'PRODUCTION',
-    footerName: 'MS Blora (Wellhead & Biomass)',
-    footerDetail: 'Fasilitas Ekstraksi Gas Sumur & Woodchip Processing.',
+    title: 'Mother Station Blora',
+    role: 'Mother Station CNG',
+    desc: 'Mother Station CNG Blora sebagai bagian dari jaringan pasokan CNG Reethau.',
+    activeSpareParts: 85,
+    image: '/assets/images/cng-cylinder.webp',
+    features: FEATURES_UMUM,
+    status: { IDN: 'Mother Station Aktif', ENG: 'Mother Station Active' }, statusLabel: 'OPERATIONAL',
+    footerName: 'MS Blora (Mother Station)',
+    footerDetail: 'Mother Station CNG Blora.',
   },
   {
     key: 'wunut', label: 'MS Wunut', short: 'Wunut', color: '#38BDF8',
