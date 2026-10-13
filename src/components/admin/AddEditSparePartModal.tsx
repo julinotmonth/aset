@@ -178,7 +178,7 @@ export const AddEditSparePartModal: React.FC<AddEditSparePartModalProps> = ({
   const [name, setName] = useState('');
   const [category, setCategory] = useState<SparePartCategory>('Valves & Control');
   const [productEnergy, setProductEnergy] = useState<ProductEnergyCategory>('CNG');
-  const [site, setSite] = useState<SiteLocation>('bekasi');
+  const [site, setSite] = useState<SiteLocation>('setu');
   const [stock, setStock] = useState(10);
   const [minStock, setMinStock] = useState(5);
   const [unit, setUnit] = useState('Units');
@@ -216,7 +216,7 @@ export const AddEditSparePartModal: React.FC<AddEditSparePartModalProps> = ({
       setName('');
       setCategory('Valves & Control');
       setProductEnergy('CNG');
-      setSite('bekasi');
+      setSite('setu');
       setStock(10);
       setMinStock(5);
       setUnit('Units');

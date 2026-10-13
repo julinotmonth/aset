@@ -15,8 +15,7 @@ interface UserFormModalProps {
 
 const SITE_OPTIONS: { value: SiteFilter; label: string }[] = [
   { value: 'global', label: 'Semua Site (Global)' },
-  { value: 'bekasi', label: 'Site Bekasi' },
-  { value: 'indramayu', label: 'Site Indramayu' },
+  { value: 'indramayu', label: 'Site Cibungur' },
   { value: 'blora', label: 'Site Blora' },
   { value: 'setu', label: 'Site Setu' },
 ];

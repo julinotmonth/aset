@@ -126,6 +126,10 @@ function KartuRingkas({ label, nilai, nada, aktif, onClick }: {
   );
 }
 
+// Sama dengan labelPenuh() di WeeklyReportView.tsx (disalin di sini agar tidak
+// terjadi import melingkar): site tanpa prefix MS/WS/LNG diberi awalan "MS ".
+const labelPenuh = (label: string) => (/^\s*(ms|ws|lng)\b/i.test(label) ? label : `MS ${label}`);
+
 export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }: Props) {
   const [items, setItems] = useState<PicaItem[]>([]);
   const [source, setSource] = useState<PicaSource | null>(null);
@@ -214,7 +218,7 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
       <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center' }}>
         <select value={site} onChange={(e) => onSiteChange(e.target.value)} disabled={siteTerkunci} aria-label="Pilih site"
           className="wr-ctl" style={kontrol}>
-          {sites.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          {sites.map((s) => <option key={s.key} value={s.key}>{labelPenuh(s.label)}</option>)}
         </select>
 
         <div style={{ position: 'relative' }}>

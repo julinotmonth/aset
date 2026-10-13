@@ -24,7 +24,7 @@ import {
   TrendingDown, TrendingUp, Package, Boxes, ClipboardList, Target, X, PackageCheck, FileText,
 } from 'lucide-react';
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import type { AuthState } from '../../types';
@@ -136,12 +136,12 @@ const rupiahPenuh = (n: number) => `Rp ${Math.round(n).toLocaleString('id-ID')}`
 
 // Sebagian besar site berlabel polos ("Wunut", "Setu") jadi ditampilkan
 // pakai prefix "MS" biar konsisten dengan sebutan sehari-hari ("MS Wunut").
-// Tapi tidak semua site adalah Mother Station — mis. WS Dawuan — yang
+// Tapi tidak semua site adalah Mother Station — mis. WS Cibungur — yang
 // labelnya sudah menyertakan prefix sendiri. Jangan dobel jadi "MS WS
-// Dawuan": kalau label sudah diawali "MS"/"WS", pakai apa adanya.
+// Cibungur": kalau label sudah diawali "MS"/"WS", pakai apa adanya.
 const labelPenuh = (label: string) => (/^\s*(ms|ws|lng)\b/i.test(label) ? label : `MS ${label}`);
 
-// Sebagian site (WS Dawuan/"indramayu") itu bengkel armada kendaraan, bukan
+// Sebagian site (WS Cibungur/"indramayu") itu bengkel armada kendaraan, bukan
 // fasilitas dengan mesin tetap — kolom Alokasi-nya diisi PLAT KENDARAAN yang
 // jumlahnya puluhan dan berubah tiap minggu (truk baru masuk servis, dst),
 // beda dari Wunut/Setu/Blora yang Alokasi-nya nama mesin tetap (jumlahnya
@@ -199,7 +199,7 @@ const TAB_DEFAULT = (site: string) => {
     return ['Out', 'In', 'Out (1)', 'In (1)'];
   }
   if (site === 'indramayu') {
-    // WS Dawuan (key tetap "indramayu") juga cuma dua tab polos "Out"/"In",
+    // WS Cibungur (key tetap "indramayu") juga cuma dua tab polos "Out"/"In",
     // sama seperti MS Blora — bukan pola "Report Weekly MS ... RDA OUT".
     return ['Out', 'In'];
   }
@@ -977,17 +977,24 @@ export function WeeklyReportView({ auth }: Props) {
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             <PanelGrafik judul="Nilai Barang Masuk per Minggu (per vendor)">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={masuk.batang} margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
+                <LineChart
+                  data={masuk.batang.map((r) => ({
+                    ...r,
+                    Total: masuk.vendorTop.reduce((t, v) => t + (Number((r as Record<string, unknown>)[v.name]) || 0), 0),
+                  }))}
+                  margin={{ top: 8, right: 14, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} vertical={false} />
                   <XAxis dataKey="minggu" tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={ringkas} tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} width={52} />
-                  <Tooltip {...tooltipProps} formatter={fmtTooltip} cursor={{ fill: W['--wr-cursor-fill'] }} />
+                  <Tooltip {...tooltipProps} formatter={fmtTooltip} cursor={{ stroke: W['--wr-cursor'] }} />
                   <Legend wrapperStyle={{ fontSize: '.7rem' }} formatter={fmtLegend} />
-                  {masuk.vendorTop.map((v, i) => (
-                    <Bar key={v.name} dataKey={v.name} stackId="a" fill={rv(v.warna)} stroke={W['--wr-seg-gap']} strokeWidth={1}
-                      radius={i === masuk.vendorTop.length - 1 ? [4, 4, 0, 0] : undefined} />
+                  {/* Garis tebal = total semua vendor; garis tipis = per vendor. */}
+                  <Line type="monotone" dataKey="Total" stroke={W['--wr-out']} strokeWidth={2.6} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls />
+                  {masuk.vendorTop.map((v) => (
+                    <Line key={v.name} type="monotone" dataKey={v.name} stroke={rv(v.warna)} strokeWidth={1.6}
+                      dot={{ r: 2 }} activeDot={{ r: 4 }} connectNulls />
                   ))}
-                </BarChart>
+                </LineChart>
               </ResponsiveContainer>
             </PanelGrafik>
 

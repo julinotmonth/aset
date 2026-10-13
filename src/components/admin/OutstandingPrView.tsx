@@ -12,7 +12,7 @@ import {
   FileText, FileCheck2, Hourglass, MapPin,
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line, Legend,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line, Legend,
 } from 'recharts';
 import { api } from '../../lib/api';
 import type { AuthState } from '../../types';
@@ -150,7 +150,7 @@ export function OutstandingPrView({ auth }: Props) {
   const teratas = barisSite[0];
 
   const dataBar = useMemo(() => barisSite.map((r) => ({
-    name: r.s.label, ...Object.fromEntries(kats.map((k) => [k, r.cats.find((c) => c.name === k)?.total ?? 0])),
+    name: r.s.label, Total: r.total, ...Object.fromEntries(kats.map((k) => [k, r.cats.find((c) => c.name === k)?.total ?? 0])),
   })), [barisSite, kats]);
 
   const unduhCsv = () => {
@@ -273,18 +273,20 @@ export function OutstandingPrView({ auth }: Props) {
           <div className="os-hero">
             <div className="glass-panel os-fade" style={{ borderRadius: 16, padding: '1rem 1.1rem', minWidth: 0 }}>
               <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.6rem' }}>PR outstanding per site</div>
-              <div style={{ height: Math.max(190, barisSite.length * 54 + 70) }}>
+              <div style={{ height: 260 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={dataBar} layout="vertical" margin={{ top: 4, right: 18, left: 4, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} horizontal={false} />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="name" width={92} tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} />
-                    <Tooltip {...tooltipProps} formatter={(v: unknown, n: unknown) => [`${v} PR`, String(n)]} cursor={{ fill: W['--wr-cursor'] }} />
+                  <LineChart data={dataBar} margin={{ top: 8, right: 14, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} vertical={false} />
+                    <XAxis dataKey="name" interval={0} tick={{ fontSize: 10, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} width={34} />
+                    <Tooltip {...tooltipProps} formatter={(v: unknown, n: unknown) => [`${v} PR`, String(n)]} cursor={{ stroke: W['--wr-cursor'] }} />
                     <Legend wrapperStyle={{ fontSize: '.7rem' }} formatter={fmtLegend} />
-                    {kats.map((k, i) => (
-                      <Bar key={k} dataKey={k} stackId="pr" fill={warna(k)} radius={i === kats.length - 1 ? [0, 6, 6, 0] : 0} maxBarSize={26} />
+                    {/* Garis tebal = total PR per site; garis tipis = per kategori. */}
+                    <Line type="monotone" dataKey="Total" stroke={W['--wr-out']} strokeWidth={2.6} dot={{ r: 2.5 }} activeDot={{ r: 5 }} />
+                    {kats.map((k) => (
+                      <Line key={k} type="monotone" dataKey={k} stroke={warna(k)} strokeWidth={1.6} dot={{ r: 2 }} activeDot={{ r: 4 }} />
                     ))}
-                  </BarChart>
+                  </LineChart>
                 </ResponsiveContainer>
               </div>
             </div>
