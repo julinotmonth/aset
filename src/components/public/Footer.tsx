@@ -67,7 +67,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
                 style={{ height: '52px', objectFit: 'contain', filter: 'drop-shadow(0 0 12px rgba(0,208,132,0.3))' }}
               />
             </div>
-            <p style={{ color: '#64748B', fontSize: '0.875rem', lineHeight: 1.75, marginBottom: '1.75rem', maxWidth: '340px' }}>
+            <p style={{ color: '#B4C1D4', fontSize: '0.94rem', lineHeight: 1.75, marginBottom: '1.75rem', maxWidth: '340px' }}>
               PT Reethau Clean Energy bergerak di bidang pengolahan dan penyaluran gas alam (CNG, LNG) serta energi biomassa terbarukan untuk mendukung industri hijau Indonesia.
             </p>
 
@@ -80,7 +80,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
                 border: '1px solid rgba(0,208,132,0.3)',
                 padding: '0.7rem 1.25rem',
                 borderRadius: '12px',
-                fontSize: '0.82rem',
+                fontSize: '0.88rem',
                 fontWeight: 700,
                 cursor: 'pointer',
                 display: 'inline-flex', alignItems: 'center', gap: '0.6rem',
@@ -131,8 +131,8 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
                 )}
               </div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ color: '#E2E8F0', fontWeight: 700, fontSize: '0.78rem' }}>Pindai untuk membuka situs</div>
-                <div style={{ color: '#64748B', fontSize: '0.72rem', lineHeight: 1.5 }}>Akses cepat dari perangkat mobile Anda</div>
+                <div style={{ color: '#E2E8F0', fontWeight: 700, fontSize: '0.9rem' }}>Pindai untuk membuka situs</div>
+                <div style={{ color: '#B4C1D4', fontSize: '0.84rem', lineHeight: 1.5 }}>Akses cepat dari perangkat mobile Anda</div>
               </div>
             </div>
           </div>
@@ -156,8 +156,8 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
                     <MapPin size={14} color="#00D084" />
                   </div>
                   <div>
-                    <div style={{ color: '#E2E8F0', fontWeight: 700, fontSize: '0.875rem', marginBottom: '2px' }}>{s.name}</div>
-                    <div style={{ color: '#64748B', fontSize: '0.8rem', lineHeight: 1.6 }}>{s.detail}</div>
+                    <div style={{ color: '#E2E8F0', fontWeight: 700, fontSize: '0.94rem', marginBottom: '2px' }}>{s.name}</div>
+                    <div style={{ color: '#B4C1D4', fontSize: '0.86rem', lineHeight: 1.6 }}>{s.detail}</div>
                   </div>
                 </div>
               ))}
@@ -170,16 +170,16 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
               Head Office & Marketing
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem', marginBottom: '2rem' }}>
-              <p style={{ color: '#94A3B8', fontSize: '0.875rem', lineHeight: 1.7 }}>
+              <p style={{ color: '#D0D9E6', fontSize: '0.94rem', lineHeight: 1.7 }}>
                 <span style={{ color: '#E2E8F0', fontWeight: 600 }}>Head Office:</span><br />
                 Jl. Darmawangsa Raya No. 8, Kebayoran Baru<br />
                 Jakarta Selatan 12160
               </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', color: '#94A3B8', fontSize: '0.875rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', color: '#D0D9E6', fontSize: '0.94rem' }}>
                 <Mail size={16} color="#00D084" strokeWidth={2} />
                 marketing@reethau.com
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', color: '#94A3B8', fontSize: '0.875rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', color: '#D0D9E6', fontSize: '0.94rem' }}>
                 <Phone size={16} color="#00D084" strokeWidth={2} />
                 +62 21 723 1238 / 720 7130
               </div>
@@ -187,7 +187,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
 
             {/* ISO Badge */}
             <div>
-              <div style={{ color: '#475569', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 800, marginBottom: '0.75rem' }}>
+              <div style={{ color: '#B4C1D4', fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 800, marginBottom: '0.75rem' }}>
                 Sertifikasi Mutu ISO
               </div>
               <img
@@ -207,7 +207,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           flexWrap: 'wrap', gap: '1rem',
         }}>
-          <div style={{ color: '#475569', fontSize: '0.78rem' }}>
+          <div style={{ color: '#B4C1D4', fontSize: '0.9rem' }}>
             © {new Date().getFullYear()} PT Reethau Clean Energy. All rights reserved.
           </div>
           <div style={{ display: 'flex', gap: '1.75rem' }}>
@@ -218,7 +218,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdminLogin }) => {
                 style={{
                   color: hoveredLink === link ? '#00D084' : '#475569',
                   textDecoration: 'none',
-                  fontSize: '0.78rem',
+                  fontSize: '0.9rem',
                   fontWeight: 500,
                   transition: 'color 180ms ease',
                 }}

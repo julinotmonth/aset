@@ -91,14 +91,14 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
           <h2 style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)', fontWeight: 800, marginTop: '0.5rem', lineHeight: 1.15 }}>
             {c.h2a} <span style={{ color: '#00D084' }}>{c.h2b}</span>
           </h2>
-          <p style={{ color: '#94A3B8', fontSize: '1.05rem', marginTop: '1rem', lineHeight: 1.8 }}>
+          <p style={{ color: '#D0D9E6', fontSize: '1.05rem', marginTop: '1rem', lineHeight: 1.8 }}>
             {c.desc}
           </p>
         </div>
 
         {/* ── QUICK SITE STATUS STRIP (moved here from Hero) ── */}
         <div className="reveal-item" style={{ marginBottom: '3.5rem' }}>
-          <div style={{ fontSize: '0.66rem', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#475569', marginBottom: '0.75rem' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#B4C1D4', marginBottom: '0.75rem' }}>
             {c.sitesLabel}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0.75rem' }}>
@@ -134,9 +134,9 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
                     <MapPin size={16} strokeWidth={2} />
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#FFFFFF' }}>{detail.label}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#94A3B8' }}>{detail.role}</div>
-                    <div style={{ fontSize: '0.66rem', color: detail.color, fontWeight: 700, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#FFFFFF' }}>{detail.label}</div>
+                    <div style={{ fontSize: '0.82rem', color: '#D0D9E6' }}>{detail.role}</div>
+                    <div style={{ fontSize: '0.78rem', color: detail.color, fontWeight: 700, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{
                         width: '6px', height: '6px', borderRadius: '50%', background: detail.color, display: 'inline-block',
                         animation: 'pulseGlow 1.8s ease-in-out infinite',
@@ -174,10 +174,10 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
               }}>
                 {pillarIcons[i]}
               </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#FFFFFF', marginBottom: '0.75rem' }}>
+              <h3 style={{ fontSize: '1.12rem', fontWeight: 800, color: '#FFFFFF', marginBottom: '0.75rem' }}>
                 {card.title}
               </h3>
-              <p style={{ color: '#94A3B8', fontSize: '0.9rem', lineHeight: 1.75 }}>{card.text}</p>
+              <p style={{ color: '#D0D9E6', fontSize: '0.96rem', lineHeight: 1.75 }}>{card.text}</p>
             </div>
           ))}
         </div>
@@ -211,8 +211,8 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
             <div className="site-tab-pills" style={{
               display: 'flex', gap: '4px',
               background: 'rgba(7,12,24,0.8)', padding: '4px',
-              borderRadius: '9999px', border: '1px solid rgba(255,255,255,0.07)',
-              maxWidth: '100%', overflowX: 'auto',
+              borderRadius: '20px', border: '1px solid rgba(255,255,255,0.14)',
+              maxWidth: '100%', flexWrap: 'wrap', justifyContent: 'flex-end',
             }}>
               {PUBLIC_SITES.map(({ key: site, short }) => (
                 <button
@@ -222,10 +222,10 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
                     background: activeSite === site ? '#00D084' : 'transparent',
                     color: activeSite === site ? '#060C18' : '#94A3B8',
                     border: 'none',
-                    padding: '0.55rem 1.35rem',
+                    padding: '0.6rem 1.25rem',
                     borderRadius: '9999px',
                     fontWeight: 800,
-                    fontSize: '0.85rem',
+                    fontSize: '0.91rem',
                     cursor: 'pointer',
                     transition: 'all 220ms ease',
                     fontFamily: 'var(--font-main)',
@@ -241,14 +241,14 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
           {/* Site Content */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: '2.5rem', alignItems: 'center' }}>
             <div>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: '#00D084', fontWeight: 700, fontSize: '0.8rem', marginBottom: '0.85rem' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: '#00D084', fontWeight: 700, fontSize: '0.86rem', marginBottom: '0.85rem' }}>
                 <MapPin size={14} />
                 {currentSite.role}
               </div>
               <h4 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#FFFFFF', marginBottom: '1rem', letterSpacing: '-0.015em' }}>
                 {currentSite.title}
               </h4>
-              <p style={{ color: '#94A3B8', lineHeight: 1.75, fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+              <p style={{ color: '#D0D9E6', lineHeight: 1.75, fontSize: '0.96rem', marginBottom: '1.5rem' }}>
                 {currentSite.desc}
               </p>
 
@@ -257,13 +257,13 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(0, 1fr))', gridAutoFlow: 'column', gap: '0.9rem', marginBottom: '1.5rem' }}>
                   {currentSite.capacity && (
                     <div style={{ background: 'rgba(0,208,132,0.08)', border: '1px solid rgba(0,208,132,0.25)', borderRadius: '12px', padding: '1rem' }}>
-                      <div style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Kapasitas Operasional</div>
+                      <div style={{ fontSize: '0.82rem', color: '#B4C1D4', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Kapasitas Operasional</div>
                       <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#00D084', marginTop: '4px' }}>{currentSite.capacity}</div>
                     </div>
                   )}
                   {currentSite.activeSpareParts !== undefined && (
                     <div style={{ background: 'rgba(96,165,250,0.07)', border: '1px solid rgba(96,165,250,0.25)', borderRadius: '12px', padding: '1rem' }}>
-                      <div style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Spare Part MS Active</div>
+                      <div style={{ fontSize: '0.82rem', color: '#B4C1D4', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Spare Part MS Active</div>
                       <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#60A5FA', marginTop: '4px' }}>{currentSite.activeSpareParts} Items</div>
                     </div>
                   )}
@@ -273,7 +273,7 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
               {/* Features */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
                 {currentSite.features.map((feat, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#CBD5E1', fontSize: '0.875rem' }}>
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#CBD5E1', fontSize: '0.94rem' }}>
                     <ShieldCheck size={15} color="#00D084" strokeWidth={2.5} />
                     {feat}
                   </div>
@@ -291,11 +291,11 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
               <img src={currentSite.image} alt={currentSite.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(7,12,24,0.95) 0%, transparent 55%)' }} />
               <div style={{ position: 'absolute', bottom: '1.25rem', left: '1.25rem', right: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '0.875rem' }}>{currentSite.title}</span>
+                <span style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '0.94rem' }}>{currentSite.title}</span>
                 <span style={{
                   background: currentSite.color, color: '#060C18',
                   padding: '0.2rem 0.7rem', borderRadius: '9999px',
-                  fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.06em',
+                  fontSize: '0.77rem', fontWeight: 800, letterSpacing: '0.06em',
                 }}>
                   {currentSite.statusLabel}
                 </span>
@@ -311,7 +311,7 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#FFFFFF', marginTop: '0.5rem' }}>
               {c.galleryTitle}
             </h3>
-            <p style={{ color: '#64748B', fontSize: '0.875rem', marginTop: '0.5rem' }}>{c.gallerySub}</p>
+            <p style={{ color: '#B4C1D4', fontSize: '0.94rem', marginTop: '0.5rem' }}>{c.gallerySub}</p>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: '1rem' }}>
@@ -343,7 +343,7 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
                   display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '0.9rem',
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '0.82rem' }}>{img.caption}</span>
+                    <span style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '0.88rem' }}>{img.caption}</span>
                     <div style={{
                       width: '28px', height: '28px', borderRadius: '50%',
                       background: hoveredGallery === i ? '#00D084' : 'rgba(0,208,132,0.2)',
@@ -403,7 +403,7 @@ export const VisionSection: React.FC<VisionSectionProps> = ({ lang }) => {
             <div style={{ padding: '1.75rem' }}>
               <div className="section-label">FASILITAS LAPANGAN REETHAU</div>
               <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#FFFFFF', marginTop: '0.5rem' }}>{selectedImage.caption}</h3>
-              <p style={{ color: '#94A3B8', fontSize: '0.9rem', marginTop: '0.5rem', lineHeight: 1.7 }}>{selectedImage.desc}</p>
+              <p style={{ color: '#D0D9E6', fontSize: '0.96rem', marginTop: '0.5rem', lineHeight: 1.7 }}>{selectedImage.desc}</p>
             </div>
           </div>
         </div>

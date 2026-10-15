@@ -201,7 +201,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
               border: '1px solid rgba(0,208,132,0.4)',
               borderRadius: '9999px',
               color: '#00D084',
-              fontSize: '0.68rem',
+              fontSize: '0.8rem',
               fontWeight: 800,
               letterSpacing: '0.14em',
               textTransform: 'uppercase',
@@ -241,11 +241,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
 
             {/* CTA Buttons */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
-              <a href="#produk" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              <a href="#produk" className="btn-primary" style={{ fontSize: '0.91rem' }}>
                 <Flame size={17} strokeWidth={2.5} />
                 {t.cta1}
               </a>
-              <button onClick={onOpenAdminLogin} className="btn-outline" style={{ fontSize: '0.85rem' }}>
+              <button onClick={onOpenAdminLogin} className="btn-outline" style={{ fontSize: '0.91rem' }}>
                 <Cpu size={17} strokeWidth={2} />
                 {t.cta2}
               </button>
@@ -307,7 +307,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                 <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF', lineHeight: 1.25 }}>
                   {t.calcTitle}
                 </div>
-                <div style={{ fontSize: '0.74rem', color: '#64748B', marginTop: '2px' }}>
+                <div style={{ fontSize: '0.86rem', color: '#B4C1D4', marginTop: '2px' }}>
                   {t.calcSub}
                 </div>
               </div>
@@ -315,7 +315,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
 
             {/* Energy type selector tabs */}
             <div style={{ marginBottom: 'clamp(0.65rem, 2vh, 0.9rem)' }}>
-              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#B4C1D4', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>
                 {t.chooseEnergy}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
@@ -334,7 +334,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                         border: `1.5px solid ${isActive ? cfg.color : 'rgba(255,255,255,0.08)'}`,
                         background: isActive ? `${cfg.color}1f` : 'rgba(255,255,255,0.02)',
                         color: isActive ? cfg.color : '#94A3B8',
-                        fontSize: '0.74rem',
+                        fontSize: '0.86rem',
                         fontWeight: 700,
                         cursor: 'pointer',
                         transition: 'all 0.25s var(--ease-out-expo)',
@@ -358,7 +358,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 marginBottom: '0.45rem',
               }}>
-                <span style={{ fontSize: '0.8rem', color: '#94A3B8', fontWeight: 500 }}>
+                <span style={{ fontSize: '0.86rem', color: '#D0D9E6', fontWeight: 500 }}>
                   {t.sliderLabel}
                 </span>
                 <span style={{
@@ -383,7 +383,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                   style={{
                     flexShrink: 0, width: '26px', height: '26px', borderRadius: '7px',
                     border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)',
-                    color: '#94A3B8', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#D0D9E6', display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: fuelVolume <= 5000 ? 'not-allowed' : 'pointer',
                     opacity: fuelVolume <= 5000 ? 0.4 : 1,
                     transition: 'all 0.2s ease',
@@ -397,7 +397,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                     <div style={{
                       position: 'absolute', bottom: '100%', left: `${pct}%`, transform: 'translateX(-50%)',
                       marginBottom: '10px', padding: '0.3rem 0.6rem', borderRadius: '7px',
-                      background: activeConfig.color, color: '#0A0F1D', fontSize: '0.72rem', fontWeight: 800,
+                      background: activeConfig.color, color: '#0A0F1D', fontSize: '0.84rem', fontWeight: 800,
                       whiteSpace: 'nowrap', boxShadow: `0 4px 14px ${activeConfig.color}66`,
                       animation: 'fadeIn 0.15s ease',
                     }}>
@@ -423,7 +423,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                   style={{
                     flexShrink: 0, width: '26px', height: '26px', borderRadius: '7px',
                     border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)',
-                    color: '#94A3B8', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#D0D9E6', display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: fuelVolume >= 150000 ? 'not-allowed' : 'pointer',
                     opacity: fuelVolume >= 150000 ? 0.4 : 1,
                     transition: 'all 0.2s ease',
@@ -433,7 +433,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                 </button>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#475569', marginTop: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#B4C1D4', marginTop: '4px' }}>
                 <span>5.000 L</span>
                 <span style={{ fontStyle: 'italic', opacity: 0.8 }}>{t.dragHint}</span>
                 <span>150.000 L</span>
@@ -443,16 +443,16 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
             {/* Cost comparison bar chart */}
             <div style={{ marginBottom: '0.9rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.7rem', color: '#94A3B8', fontWeight: 600 }}>{t.dieselLabel}</span>
-                <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 700 }}>{formatIDR(dieselTotalCost)}</span>
+                <span style={{ fontSize: '0.82rem', color: '#D0D9E6', fontWeight: 600 }}>{t.dieselLabel}</span>
+                <span style={{ fontSize: '0.88rem', color: '#E2E8F0', fontWeight: 700 }}>{formatIDR(dieselTotalCost)}</span>
               </div>
               <div style={{ height: '7px', borderRadius: '4px', background: 'rgba(255,255,255,0.06)', overflow: 'hidden', marginBottom: '0.55rem' }}>
                 <div style={{ width: '100%', height: '100%', background: '#64748B', borderRadius: '4px' }} />
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.7rem', color: activeConfig.color, fontWeight: 700 }}>{t.reethauLabel}</span>
-                <span style={{ fontSize: '0.76rem', color: activeConfig.color, fontWeight: 800 }}>{formatIDR(reethauTotalCost)}</span>
+                <span style={{ fontSize: '0.82rem', color: activeConfig.color, fontWeight: 700 }}>{t.reethauLabel}</span>
+                <span style={{ fontSize: '0.88rem', color: activeConfig.color, fontWeight: 800 }}>{formatIDR(reethauTotalCost)}</span>
               </div>
               <div style={{ height: '7px', borderRadius: '4px', background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
                 <div style={{
@@ -463,7 +463,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                   transition: 'width 0.55s var(--ease-out-expo), background 0.3s ease',
                 }} />
               </div>
-              <div style={{ textAlign: 'right', marginTop: '0.3rem', fontSize: '0.7rem', color: activeConfig.color, fontWeight: 700 }}>
+              <div style={{ textAlign: 'right', marginTop: '0.3rem', fontSize: '0.82rem', color: activeConfig.color, fontWeight: 700 }}>
                 −{savingsPct}% {t.savingsPctLabel}
               </div>
             </div>
@@ -478,7 +478,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                 padding: '0.8rem 0.85rem',
                 transition: 'all 0.3s ease',
               }}>
-                <div style={{ fontSize: '0.6rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.3rem' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#B4C1D4', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.3rem' }}>
                   {t.savLabel}
                 </div>
                 <div style={{ fontSize: '1.02rem', fontWeight: 800, color: activeConfig.color, letterSpacing: '-0.025em', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
@@ -492,7 +492,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
                 borderRadius: '11px',
                 padding: '0.8rem 0.85rem',
               }}>
-                <div style={{ fontSize: '0.6rem', fontWeight: 800, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.3rem' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#B4C1D4', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.3rem' }}>
                   {t.co2Label}
                 </div>
                 <div style={{ fontSize: '1.02rem', fontWeight: 800, color: '#60A5FA', letterSpacing: '-0.025em', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
@@ -504,7 +504,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
             {/* CTA */}
             <a href="#kontak" className="btn-primary" style={{
               width: '100%', justifyContent: 'center',
-              fontSize: '0.85rem', fontWeight: 800,
+              fontSize: '0.91rem', fontWeight: 800,
               padding: '0.7rem 1.85rem',
               background: activeConfig.color,
               transition: 'background 0.3s ease',
@@ -522,7 +522,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ lang, onOpenAdminLogin
       <div style={{
         position: 'absolute', bottom: 'clamp(0.4rem, 1.5vh, 0.9rem)', left: '50%', transform: 'translateX(-50%)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem',
-        color: '#475569', fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.06em',
+        color: '#B4C1D4', fontSize: '0.77rem', fontWeight: 600, letterSpacing: '0.06em',
         textTransform: 'uppercase',
       }}>
         <span>{t.scroll}</span>
