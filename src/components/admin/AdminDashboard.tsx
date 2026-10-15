@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LogOut,
-  Plus,
-  Search,
   Activity,
   CalendarDays,
   Package,
@@ -25,8 +23,9 @@ import type { AuthState, SparePart, SiteFilter, ActivityLog, SiteLocation, AppUs
 import { getSparePartCategories } from '../../data/categoryStore';
 import { getSites, useSitesRefresh } from '../../data/siteStore';
 import { api } from '../../lib/api';
-import { SiteSelector } from './SiteSelector';
-import { SparePartTable } from './SparePartTable';
+import { SparePartView } from './SparePartView';
+import { hitungStatusStok } from './sparePartStatus';
+import { labelSiteDariKey } from './siteLabel';
 import { TransferModal } from './TransferModal';
 import { AddEditSparePartModal } from './AddEditSparePartModal';
 import { UserFormModal } from './UserFormModal';
@@ -52,7 +51,10 @@ import {
   timeAgo,
   SITE_LABEL,
 } from './AdminExtraViews';
-import { AssetRegistryView, WorkOrdersView, ReportsView } from './AssetManagementViews';
+import { ReportsView } from './AssetManagementViews';
+import { AssetRegistryView } from './AssetRegistryView';
+import { WorkOrdersView, type OpsiSelesai } from './WorkOrdersView';
+import { tambahBulan } from './eamHelpers';
 
 interface AdminDashboardProps {
   auth: AuthState;
@@ -149,7 +151,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   // Bumped whenever a site is added/edited/deleted (see BranchesView), so the
   // dashboard's site filter, siteCounts, and every "pick a site" dropdown
   // re-render with the current list instead of a stale snapshot.
-  const [sitesVersion, setSitesVersion] = useState(0);
+  const [, setSitesVersion] = useState(0);
   // Extra safety net alongside the manual sitesVersion bump above: also
   // react to the global "sites changed" event so nothing ever goes stale.
   useSitesRefresh();
@@ -217,8 +219,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   };
 
   const [currentSite, setCurrentSite] = useState<SiteFilter>(auth.assignedSite || 'global');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [categoryOptions, setCategoryOptions] = useState<string[]>(getSparePartCategories());
 
   const [isAddEditOpen, setIsAddEditOpen] = useState(false);
@@ -271,15 +271,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  const filteredSpareParts = spareParts.filter((item) => {
-    const matchesSite = currentSite === 'global' || item.site === currentSite;
-    const matchesCategory = selectedCategory === 'ALL' || item.category === selectedCategory;
-    const matchesSearch =
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.specifications.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSite && matchesCategory && matchesSearch;
-  });
+  // Filter site untuk Dashboard. (Halaman Spare Part punya filter sendiri di SparePartView.)
+  const filteredSpareParts = spareParts.filter((item) => currentSite === 'global' || item.site === currentSite);
 
   const siteCounts: Record<string, number> = { global: spareParts.length };
   getSites().forEach((s) => {
@@ -380,6 +373,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
     }
   };
 
+  // Penyesuaian stok cepat (tombol − / + di tabel Spare Part): ubah stok, hitung ulang
+  // status, lalu catat ke Audit / Log. Stok tidak pernah turun di bawah 0.
+  const handleAdjustStock = async (item: SparePart, delta: number) => {
+    const current = spareParts.find((p) => p.id === item.id) ?? item;
+    const newStock = Math.max(0, current.stock + delta);
+    if (newStock === current.stock) return;
+    try {
+      const updated = await api.patch<SparePart>(`/spare-parts/${encodeURIComponent(current.id)}`, {
+        stock: newStock,
+        status: hitungStatusStok(newStock, current.minStock, current.status),
+      });
+      setSpareParts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+      const newLog = await api.post<ActivityLog>('/logs', {
+        action: 'STOCK_UPDATE',
+        description: `Penyesuaian stok ${current.name} (${current.sku}) di ${labelSiteDariKey(current.site)}: ${current.stock} → ${newStock} ${current.unit}`,
+        performedBy: auth.username,
+        siteFrom: current.site,
+      });
+      setLogs((prev) => [newLog, ...prev]);
+      showToast(`Stok ${current.name}: ${current.stock} → ${newStock} ${current.unit}.`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal mengubah stok.');
+    }
+  };
+
   const handleDeleteSparePart = async (id: string) => {
     if (!confirm('Apakah Anda yakin ingin menghapus data spare part ini?')) return;
     const target = spareParts.find((p) => p.id === id);
@@ -440,11 +458,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
     }
   };
 
-  const handleCompleteWorkOrder = async (id: string) => {
+  // Sinkronkan status aset dengan pekerjaan maintenance-nya: aset "Active" menjadi
+  // "Under Maintenance" saat ada pekerjaan In Progress, dan kembali "Active" bila
+  // sudah tidak ada. Status Retired/Disposed tidak pernah diubah otomatis.
+  const sinkronStatusAset = async (assetId: string, woSetelah: WorkOrder[]) => {
+    const aset = fixedAssets.find((a) => a.id === assetId);
+    if (!aset || (aset.status !== 'Active' && aset.status !== 'Under Maintenance')) return;
+    const adaDikerjakan = woSetelah.some((w) => w.assetId === assetId && w.status === 'In Progress');
+    const target: FixedAsset['status'] = adaDikerjakan ? 'Under Maintenance' : 'Active';
+    if (target === aset.status) return;
+    const updated = await api.patch<FixedAsset>(`/fixed-assets/${encodeURIComponent(assetId)}`, { status: target });
+    setFixedAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+  };
+
+  const catatWo = async (description: string, site?: string) => {
+    const log = await api.post<ActivityLog>('/logs', { action: 'WORK_ORDER', description, performedBy: auth.username, siteFrom: site });
+    setLogs((prev) => [log, ...prev]);
+  };
+
+  const handleStartWorkOrder = async (id: string) => {
+    const wo = workOrders.find((w) => w.id === id);
+    if (!wo) return;
     try {
-      const updated = await api.post<WorkOrder>(`/work-orders/${encodeURIComponent(id)}/complete`, {});
-      setWorkOrders((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
-      showToast('Work order ditandai selesai.');
+      const updated = await api.patch<WorkOrder>(`/work-orders/${encodeURIComponent(id)}`, { status: 'In Progress' });
+      const sesudah = workOrders.map((w) => (w.id === updated.id ? updated : w));
+      setWorkOrders(sesudah);
+      await sinkronStatusAset(wo.assetId, sesudah);
+      const aset = fixedAssets.find((a) => a.id === wo.assetId);
+      await catatWo(`Pekerjaan maintenance dimulai: ${wo.title}${aset ? ` — ${aset.name} (${aset.assetCode}) di ${labelSiteDariKey(aset.site)}` : ''}`, aset?.site);
+      showToast(`Pekerjaan "${wo.title}" mulai dikerjakan.`);
+      reloadAssetData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal memulai pekerjaan.');
+    }
+  };
+
+  const handleCompleteWorkOrder = async (id: string, opsi: OpsiSelesai) => {
+    const wo = workOrders.find((w) => w.id === id);
+    if (!wo) return;
+    try {
+      let updated = await api.post<WorkOrder>(`/work-orders/${encodeURIComponent(id)}/complete`, { completedDate: opsi.completedDate });
+      if (opsi.note) {
+        const catatan = [wo.notes?.trim(), `Selesai ${opsi.completedDate}: ${opsi.note}`].filter(Boolean).join('\n');
+        updated = await api.patch<WorkOrder>(`/work-orders/${encodeURIComponent(id)}`, { notes: catatan });
+      }
+      let sesudah = workOrders.map((w) => (w.id === updated.id ? updated : w));
+
+      // Pekerjaan preventive berulang: buat jadwal berikutnya dengan data yang sama.
+      let berikutnya: WorkOrder | null = null;
+      if (opsi.nextInMonths > 0) {
+        berikutnya = await api.post<WorkOrder>('/work-orders', {
+          assetId: wo.assetId, title: wo.title, type: wo.type, priority: wo.priority,
+          dueDate: tambahBulan(opsi.completedDate, opsi.nextInMonths), assignedTo: wo.assignedTo, notes: '',
+        });
+        sesudah = [berikutnya, ...sesudah];
+      }
+      setWorkOrders(sesudah);
+      await sinkronStatusAset(wo.assetId, sesudah);
+
+      const aset = fixedAssets.find((a) => a.id === wo.assetId);
+      await catatWo(`Pekerjaan maintenance selesai: ${wo.title}${aset ? ` — ${aset.name} (${aset.assetCode}) di ${labelSiteDariKey(aset.site)}` : ''}`, aset?.site);
+      showToast(berikutnya ? `Pekerjaan selesai. Jadwal berikutnya: ${berikutnya.dueDate}.` : 'Work order ditandai selesai.');
       reloadAssetData();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Gagal menyelesaikan work order.');
@@ -452,10 +526,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   };
 
   const handleDeleteWorkOrder = async (id: string) => {
-    if (!confirm('Hapus work order ini?')) return;
+    const wo = workOrders.find((w) => w.id === id);
+    if (!confirm(`Hapus pekerjaan "${wo?.title ?? 'ini'}"?`)) return;
     try {
       await api.delete(`/work-orders/${encodeURIComponent(id)}`);
-      setWorkOrders((prev) => prev.filter((w) => w.id !== id));
+      const sesudah = workOrders.filter((w) => w.id !== id);
+      setWorkOrders(sesudah);
+      if (wo) await sinkronStatusAset(wo.assetId, sesudah);
       showToast('Work order dihapus.');
       reloadAssetData();
     } catch (err) {
@@ -682,96 +759,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         )}
 
         {activeView === 'assets' && (
-        <>
-        {/* Site Selector */}
-        <div style={{ marginBottom: '2rem' }}>
-          <div style={{ fontSize: '0.9rem', color: 'var(--txt-muted)', fontWeight: 700, marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
-            Pilih Tampilan Lokasi Site Operasional
-          </div>
-          <SiteSelector key={sitesVersion} currentSite={currentSite} onSiteChange={setCurrentSite} siteCounts={siteCounts} />
-        </div>
-
-        {/* Search & Action Bar */}
-        <div
-          className="glass-panel admin-toolbar"
-          style={{
-            borderRadius: '20px',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="admin-toolbar-fields">
-            <div style={{ position: 'relative' }}>
-              <Search size={18} color="#64748B" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)' }} />
-              <input
-                type="text"
-                placeholder="Cari nama, SKU, atau spesifikasi..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'var(--bg-root)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '10px',
-                  padding: '0.7rem 1rem 0.7rem 2.75rem',
-                  color: 'var(--txt-primary)',
-                  fontSize: '0.9rem',
-                  outline: 'none',
-                }}
-              />
-            </div>
-
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              style={{
-                background: 'var(--bg-root)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '10px',
-                padding: '0.7rem 1rem',
-                color: 'var(--txt-primary)',
-                fontSize: '0.85rem',
-                outline: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <option value="ALL">Semua Kategori</option>
-              {categoryOptions.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            onClick={() => {
-              setEditingItem(null);
-              setIsAddEditOpen(true);
-            }}
-            className="btn-primary"
-            style={{ padding: '0.75rem 1.5rem', fontSize: '0.9rem', justifyContent: 'center' }}
-          >
-            <Plus size={18} />
-            Tambah Spare Part Baru
-          </button>
-        </div>
-
-        {/* Table */}
-        <div className="glass-panel admin-table-wrap" style={{ borderRadius: '20px', padding: '1.5rem' }}>
-          <SparePartTable
-            spareParts={filteredSpareParts}
-            onEdit={(item) => {
-              setEditingItem(item);
-              setIsAddEditOpen(true);
-            }}
-            onTransfer={(item) => {
-              setTransferringItem(item);
-              setIsTransferOpen(true);
-            }}
+          <SparePartView
+            spareParts={spareParts}
+            categoryOptions={categoryOptions}
+            site={currentSite}
+            onSiteChange={setCurrentSite}
+            onAdd={() => { setEditingItem(null); setIsAddEditOpen(true); }}
+            onEdit={(item) => { setEditingItem(item); setIsAddEditOpen(true); }}
+            onTransfer={(item) => { setTransferringItem(item); setIsTransferOpen(true); }}
             onDelete={handleDeleteSparePart}
+            onAdjustStock={handleAdjustStock}
           />
-        </div>
-        </>
         )}
 
         {activeView === 'global-search' && (
@@ -789,13 +787,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           />
         )}
         {activeView === 'asset-registry' && (
-          <AssetRegistryView fixedAssets={fixedAssets} onSave={handleSaveFixedAsset} onDelete={handleDeleteFixedAsset} />
+          <AssetRegistryView fixedAssets={fixedAssets} workOrders={workOrders} onSave={handleSaveFixedAsset} onDelete={handleDeleteFixedAsset} onSaveWorkOrder={handleSaveWorkOrder} />
         )}
         {activeView === 'work-orders' && (
           <WorkOrdersView
             workOrders={workOrders}
             fixedAssets={fixedAssets}
             onSave={handleSaveWorkOrder}
+            onStart={handleStartWorkOrder}
             onComplete={handleCompleteWorkOrder}
             onDelete={handleDeleteWorkOrder}
           />
