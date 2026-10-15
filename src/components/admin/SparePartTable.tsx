@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Edit2, ArrowRightLeft, Trash2, AlertTriangle, QrCode } from 'lucide-react';
+import { Edit2, ArrowRightLeft, Trash2, AlertTriangle, QrCode, Plus, Minus } from 'lucide-react';
 import type { SparePart } from '../../types';
 import { getCategoryVisual } from '../../data/categoryVisuals';
 import { QRCodeModal } from './QRCodeModal';
@@ -10,9 +10,13 @@ interface SparePartTableProps {
   onEdit: (item: SparePart) => void;
   onTransfer: (item: SparePart) => void;
   onDelete: (id: string) => void;
+  /** Tambah/kurangi stok. delta positif = tambah, negatif = kurangi. */
+  onAdjustStock?: (item: SparePart, delta: number) => void | Promise<unknown>;
+  /** ID item yang sedang diproses (tombol stok dinonaktifkan). */
+  busyIds?: ReadonlySet<string>;
 }
 
-export const SparePartTable: React.FC<SparePartTableProps> = ({ spareParts, onEdit, onTransfer, onDelete }) => {
+export const SparePartTable: React.FC<SparePartTableProps> = ({ spareParts, onEdit, onTransfer, onDelete, onAdjustStock, busyIds }) => {
   const [qrItem, setQrItem] = useState<SparePart | null>(null);
 
   const formatIDR = (val: number) => {
@@ -58,6 +62,7 @@ export const SparePartTable: React.FC<SparePartTableProps> = ({ spareParts, onEd
       {spareParts.map((item) => {
         const visual = getCategoryVisual(item.category);
         const Icon = visual.icon;
+        const sibuk = busyIds?.has(item.id) ?? false;
         return (
           <div className="spare-row" role="row" key={item.id}>
             <div className="spare-cell cell-code" data-label="Kode / SKU">
@@ -115,6 +120,26 @@ export const SparePartTable: React.FC<SparePartTableProps> = ({ spareParts, onEd
 
             <div className="spare-cell cell-actions" data-label="Aksi">
               <div className="spare-actions">
+                {onAdjustStock && (
+                  <>
+                    <button
+                      onClick={() => onAdjustStock(item, -1)}
+                      disabled={sibuk || item.stock <= 0}
+                      title="Kurangi stok 1"
+                      className="spare-action-btn"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <button
+                      onClick={() => onAdjustStock(item, 1)}
+                      disabled={sibuk}
+                      title="Tambah stok 1"
+                      className="spare-action-btn"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </>
+                )}
                 <button onClick={() => setQrItem(item)} title="Buat QR Code Aset" className="spare-action-btn action-qr">
                   <QrCode size={16} />
                 </button>

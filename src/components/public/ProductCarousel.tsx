@@ -48,7 +48,7 @@ export const ProductCarousel: React.FC<ProductCarouselProps> = ({ lang }) => {
       safety: lang === 'IDN'
         ? ['Tangki vakum berisolasi ganda (Double-walled)', 'Sistem pelepasan tekanan berlebih (PRV)', 'Detektor kebocoran gas metana otomatis']
         : ['Double-walled vacuum insulated tanks', 'Pressure Relief Valves (PRV) redundancy', 'Automated Methane Gas Leak Detectors'],
-      image: '/assets/images/lng-storage.webp',
+      image: '/assets/images/lng-isotank.webp',
     },
     Biomass: {
       label: 'Biomass', icon: <TreeDeciduous size={18} strokeWidth={2} />, accentColor: '#34D399',

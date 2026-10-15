@@ -30,7 +30,7 @@ import {
 import type { FixedAsset, WorkOrder, ReportsSummary, SiteLocation } from '../../types';
 import { getSites } from '../../data/siteStore';
 import { SITE_LABEL, PageHeader, emptyInputStyle } from './AdminExtraViews';
-import { labelPenuh } from './';
+import { labelPenuh } from './siteLabel';
 
 const todayStr = () => new Date().toISOString().split('T')[0];
 
