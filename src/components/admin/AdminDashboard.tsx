@@ -30,7 +30,7 @@ import { TransferModal } from './TransferModal';
 import { AddEditSparePartModal } from './AddEditSparePartModal';
 import { UserFormModal } from './UserFormModal';
 import { AdminAnalytics } from './AdminAnalytics';
-import { Sidebar, type AdminView } from './Sidebar';
+import { Sidebar, type AdminView, type LaporanMode, type AsetTab } from './Sidebar';
 import { MENU_AWAL, menuTerbuka } from './menuAkses';
 import { usePerubahanLaporan, waktuMs } from './weeklyChanges';
 import { NotifPerubahanLaporan } from './NotifPerubahanLaporan';
@@ -52,7 +52,7 @@ import {
   SITE_LABEL,
 } from './AdminExtraViews';
 import { ReportsView } from './AssetManagementViews';
-import { AssetRegistryView } from './AssetRegistryView';
+import { AsetTetapView } from './AsetTetapView';
 import { WorkOrdersView, type OpsiSelesai } from './WorkOrdersView';
 import { tambahBulan } from './eamHelpers';
 
@@ -71,6 +71,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   // Satu-satunya jalan pindah menu (sidebar, Global Search, notifikasi): menu
   // yang terkunci diabaikan di sini, jadi tidak ada jalur yang bisa membukanya.
   const setActiveView = (view: AdminView) => { if (menuTerbuka(view)) setActiveViewRaw(view); };
+  // Isi halaman Laporan Mingguan (Barang Masuk/Keluar, Outstanding PR, Safety Stock, dst.).
+  const [laporanMode, setLaporanMode] = useState<LaporanMode>('OUT');
+  // Tab halaman Aset Tetap & Depresiasi (Ringkasan / Register / Asset Management).
+  const [asetTab, setAsetTab] = useState<AsetTab>('RINGKASAN');
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   // ── Theme (dark / light) ────────────────────────────────────────────────
@@ -582,6 +586,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         <Sidebar
           active={activeView}
           onNavigate={setActiveView}
+          laporanMode={laporanMode}
+          onNavigateLaporan={(m) => { setLaporanMode(m); setActiveView('weekly-report'); }}
+          asetTab={asetTab}
+          onNavigateAset={(t) => { setAsetTab(t); setActiveView('asset-registry'); }}
           isOpen={isMobileNavOpen}
           onClose={() => setIsMobileNavOpen(false)}
           showUserManagement={isSuperAdmin}
@@ -787,7 +795,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           />
         )}
         {activeView === 'asset-registry' && (
-          <AssetRegistryView fixedAssets={fixedAssets} workOrders={workOrders} onSave={handleSaveFixedAsset} onDelete={handleDeleteFixedAsset} onSaveWorkOrder={handleSaveWorkOrder} />
+          <AsetTetapView auth={auth} fixedAssets={fixedAssets} workOrders={workOrders} tab={asetTab} onTabChange={setAsetTab}
+            onSave={handleSaveFixedAsset} onDelete={handleDeleteFixedAsset} onSaveWorkOrder={handleSaveWorkOrder} />
         )}
         {activeView === 'work-orders' && (
           <WorkOrdersView
@@ -802,7 +811,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         {activeView === 'reports' && (
           <ReportsView summary={reportsSummary} fixedAssets={fixedAssets} workOrders={workOrders} />
         )}
-        {activeView === 'weekly-report' && <WeeklyReportView auth={auth} />}
+        {activeView === 'weekly-report' && <WeeklyReportView auth={auth} mode={laporanMode} />}
         {activeView === 'audit' && <AuditView logs={logs} />}
         {activeView === 'branches' && (
           <BranchesView spareParts={spareParts} onSitesChanged={() => setSitesVersion((v) => v + 1)} />

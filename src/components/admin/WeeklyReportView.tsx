@@ -21,13 +21,14 @@ import { NADA_KELAS, IKON_KELAS, ikonSub } from './asetKlasifikasiTema';
 type BarisAset = WeeklyRow & Klasifikasi;
 import {
   RefreshCw, Upload, Link2, Download, AlertTriangle, CheckCircle2, Loader2,
-  TrendingDown, TrendingUp, Package, Boxes, ClipboardList, Target, X, PackageCheck, FileText,
+  TrendingDown, TrendingUp, Package, Boxes, X,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import type { AuthState } from '../../types';
+import type { LaporanMode } from './Sidebar';
 import { api } from '../../lib/api';
 import { getSites } from '../../data/siteStore';
 import { PicaView } from './PicaView';
@@ -240,10 +241,28 @@ function PanelGrafik({ judul, children, tinggi = 250 }: { judul: string; childre
   );
 }
 
-// ── Komponen utama ────────────────────────────────────────────────────────
-interface Props { auth: AuthState; }
+// Judul halaman mengikuti menu yang dibuka dari sidebar.
+const TEKS_MASUK_KELUAR = 'Rekap penggunaan part, overhaul, oli, dan biaya lain-lain per minggu untuk setiap Mother Station, ditarik langsung dari Google Spreadsheet milik site.';
+const JUDUL_MODE: Record<LaporanMode, { judul: string; sub: string }> = {
+  IN: { judul: 'Laporan Mingguan Barang Masuk & Keluar', sub: TEKS_MASUK_KELUAR },
+  OUT: { judul: 'Laporan Mingguan Barang Masuk & Keluar', sub: TEKS_MASUK_KELUAR },
+  OS_PR: { judul: 'Outstanding PR', sub: 'Purchase request yang belum selesai per site dan per kategori.' },
+  MIN_STOCK: { judul: 'Pencapaian Safety Stock', sub: 'Pencapaian pemenuhan safety stock per minggu dan per lokasi.' },
+  WORK_TARGET: { judul: 'Work Target / KPI', sub: 'Target kerja dan pencapaian KPI seluruh perusahaan.' },
+  PICA: { judul: 'PICA', sub: 'Pelacakan masalah, identifikasi, dan tindakan korektif (Problem, Identification & Corrective Action).' },
+  ASET: { judul: 'Asset Management', sub: 'Daftar aset dan perlengkapan beserta klasifikasinya per site.' },
+};
 
-export function WeeklyReportView({ auth }: Props) {
+// ── Komponen utama ────────────────────────────────────────────────────────
+interface Props {
+  auth: AuthState;
+  /** Mode isi halaman — dipilih dari sub-menu di sidebar. */
+  mode: LaporanMode;
+  /** Sembunyikan judul halaman (dipakai saat disematkan di halaman lain). */
+  tanpaHeader?: boolean;
+}
+
+export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
   const sites = getSites();
   const isSuperAdmin = auth.role === 'Super Admin';
   // Super Admin dibuka di Wunut (site yang datanya sudah berjalan), user site
@@ -255,13 +274,27 @@ export function WeeklyReportView({ auth }: Props) {
   const [site, setSite] = useState(siteAwal);
   const [tahun, setTahun] = useState(new Date().getFullYear());
   const [bulan, setBulan] = useState<number | 0>(0);
-  const [arah, setArah] = useState<'IN' | 'OUT' | 'ASET'>('OUT');
-  const [picaAktif, setPicaAktif] = useState(false);
-  const [workTargetAktif, setWorkTargetAktif] = useState(false);
-  const [minStockAktif, setMinStockAktif] = useState(false);
-  const [osPrAktif, setOsPrAktif] = useState(false);
+  // `arah` = jenis data harian terakhir yang dipilih (IN/OUT/ASET). Mode lain
+  // (PICA, Work Target, Outstanding PR, Safety Stock) tidak mengubahnya, jadi
+  // pindah ke sana lalu kembali tidak memicu tarik data ulang yang tidak perlu.
+  const adalahModeData = (m: LaporanMode): m is 'IN' | 'OUT' | 'ASET' => m === 'IN' || m === 'OUT' || m === 'ASET';
+  const [arah, setArah] = useState<'IN' | 'OUT' | 'ASET'>(adalahModeData(mode) ? mode : 'OUT');
+  const [modeSebelumnya, setModeSebelumnya] = useState(mode);
+  if (mode !== modeSebelumnya) {
+    setModeSebelumnya(mode);
+    if (adalahModeData(mode)) setArah(mode);
+  }
+  const picaAktif = mode === 'PICA';
+  const workTargetAktif = mode === 'WORK_TARGET';
+  const minStockAktif = mode === 'MIN_STOCK';
+  const osPrAktif = mode === 'OS_PR';
 
   const [rows, setRows] = useState<WeeklyRow[]>([]);
+  // Penerimaan setahun penuh (tanpa filter bulan) untuk ranking vendor per bulan.
+  // Super Admin/user global = seluruh site (PT Reethau Dharma Andalan); user
+  // yang terkunci di satu site hanya melihat site-nya sendiri.
+  const [dataVendor, setDataVendor] = useState<WeeklyRow[]>([]);
+  const [bulanVendor, setBulanVendor] = useState<number | 0>(0);
   const [volumes, setVolumes] = useState<Record<number, number>>({});
   const [source, setSource] = useState<SheetSource | null>(null);
   const [memuat, setMemuat] = useState(true);
@@ -286,12 +319,15 @@ export function WeeklyReportView({ auth }: Props) {
         q.set('tahun', String(tahun));
         if (bulan) q.set('bulan', String(bulan));
       }
-      const [data, vol, src] = await Promise.all([
+      const qVendor = new URLSearchParams({ site: siteTerkunci ? site : 'global', direction: 'IN', tahun: String(tahun) });
+      const [data, vol, src, vendorSetahun] = await Promise.all([
         api.get<WeeklyRow[]>(`/weekly-reports?${q}`),
         api.get<{ minggu: number; m3: number }[]>(`/weekly-reports/volume?site=${site}&tahun=${tahun}`),
         api.get<SheetSource | null>(`/weekly-reports/source?site=${site}`),
+        arah === 'IN' ? api.get<WeeklyRow[]>(`/weekly-reports?${qVendor}`) : Promise.resolve<WeeklyRow[]>([]),
       ]);
       setRows(data);
+      setDataVendor(vendorSetahun);
       setVolumes(Object.fromEntries(vol.map((v) => [v.minggu, v.m3])));
       setSource(src);
       if (src) { setUrlSheet(`https://docs.google.com/spreadsheets/d/${src.sheetId}/edit`); setTabsInput(src.tabs.join('\n')); }
@@ -301,7 +337,7 @@ export function WeeklyReportView({ auth }: Props) {
     } finally {
       setMemuat(false);
     }
-  }, [site, tahun, bulan, arah]);
+  }, [site, tahun, bulan, arah, siteTerkunci]);
 
   useEffect(() => { void muatData(); }, [muatData]);
 
@@ -412,6 +448,7 @@ export function WeeklyReportView({ auth }: Props) {
       batang: mingguList.map((m) => ({
         minggu: `W${m}`,
         item: perMinggu[m]?.item ?? 0,
+        Total: perMinggu[m]?.nilai ?? 0,
         ...Object.fromEntries(vendorTop.map((v) => [v.name, perMingguVendor[m]?.[v.name] ?? 0])),
       })),
       vendorTop,
@@ -419,6 +456,31 @@ export function WeeklyReportView({ auth }: Props) {
       semua: [...rows].sort((a, b) => b.totalHarga - a.totalHarga),
     };
   }, [rows, mingguList]);
+
+  // Ranking vendor per bulan: siapa yang paling banyak berkontribusi pada nilai
+  // barang masuk (Top 1–3 beserta nilai rupiahnya).
+  const topVendor = useMemo(() => {
+    const perBulan: Record<number, Record<string, number>> = {};
+    for (const r of dataVendor) {
+      if (!r.bulan || !(r.totalHarga > 0)) continue;
+      const nama = (r.alokasi || '').trim() || 'Tanpa Supplier';
+      const b = (perBulan[r.bulan] ??= {});
+      b[nama] = (b[nama] ?? 0) + r.totalHarga;
+    }
+    const bulanAda = Object.keys(perBulan).map(Number).sort((a, b) => a - b);
+    const dipilih = bulanVendor && perBulan[bulanVendor] ? bulanVendor
+      : bulan && perBulan[bulan] ? bulan
+      : (bulanAda[bulanAda.length - 1] ?? 0);
+    const daftar = Object.entries(perBulan[dipilih] ?? {})
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+    const total = daftar.reduce((t, d) => t + d.value, 0);
+    const sisa = daftar.slice(3);
+    return {
+      bulanAda, dipilih, total, top: daftar.slice(0, 3),
+      sisaNilai: sisa.reduce((t, d) => t + d.value, 0), sisaJumlah: sisa.length,
+    };
+  }, [dataVendor, bulanVendor, bulan]);
 
   // Filter per-minggu + sortir kolom untuk tabel Barang Masuk — supaya bisa
   // fokus menganalisa satu minggu tanpa harus mengganti filter periode utama.
@@ -689,49 +751,12 @@ export function WeeklyReportView({ auth }: Props) {
   return (
     <>
       <style>{WR_CSS}</style>
-      <div className="view-page-header">
-        <div className="view-page-title">Laporan Mingguan Barang Masuk &amp; Keluar</div>
-        <div className="view-page-sub">
-          Rekap penggunaan part, overhaul, oli, dan biaya lain-lain per minggu untuk setiap Mother Station,
-          ditarik langsung dari Google Spreadsheet milik site.
+      {!tanpaHeader && (
+        <div className="view-page-header">
+          <div className="view-page-title">{JUDUL_MODE[mode].judul}</div>
+          <div className="view-page-sub">{JUDUL_MODE[mode].sub}</div>
         </div>
-      </div>
-
-      {/* Pemilih arah — memisahkan dua laporan yang berbeda sifatnya */}
-      <div style={{ display: 'flex', gap: '.5rem', marginBottom: '.85rem', flexWrap: 'wrap' }}>
-        {([
-          { id: 'WORK_TARGET', label: 'Work Target / KPI', ikon: Target, ...NADA.info },
-          { id: 'IN', label: 'Barang Masuk', ikon: TrendingUp, ...NADA.in },
-          { id: 'OUT', label: 'Barang Keluar', ikon: TrendingDown, ...NADA.out },
-          { id: 'OS_PR', label: 'Outstanding PR', ikon: FileText, ...NADA.aset },
-          { id: 'MIN_STOCK', label: 'Pencapaian Minimum Stock', ikon: PackageCheck, ...NADA.in },
-          { id: 'ASET', label: 'Asset Management', ikon: Boxes, ...NADA.aset },
-          { id: 'PICA', label: 'PICA', ikon: ClipboardList, ...NADA.warn },
-        ] as const).map((t) => {
-          const aktif = t.id === 'PICA' ? picaAktif
-            : t.id === 'WORK_TARGET' ? workTargetAktif
-            : t.id === 'MIN_STOCK' ? minStockAktif
-            : t.id === 'OS_PR' ? osPrAktif
-            : (!picaAktif && !workTargetAktif && !minStockAktif && !osPrAktif && arah === t.id);
-          const Ikon = t.ikon;
-          return (
-            <button key={t.id} type="button" className="wr-tab" aria-pressed={aktif}
-              onClick={() => {
-                // Satu mode aktif pada satu waktu (PICA / Work Target / Min. Stok / Outstanding PR / data harian).
-                setPicaAktif(t.id === 'PICA'); setWorkTargetAktif(t.id === 'WORK_TARGET');
-                setMinStockAktif(t.id === 'MIN_STOCK'); setOsPrAktif(t.id === 'OS_PR');
-                if (t.id === 'OUT' || t.id === 'IN' || t.id === 'ASET') setArah(t.id);
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.55rem 1.1rem',
-                borderRadius: 12, cursor: 'pointer', fontWeight: aktif ? 700 : 600, fontSize: '.82rem',
-                ...(aktif ? { background: t.bg, color: t.teks, border: `1px solid ${t.garis}`, boxShadow: `inset 0 -2px 0 ${t.warna}` } : {}),
-              }}>
-              <Ikon size={15} /> {t.label}
-            </button>
-          );
-        })}
-      </div>
+      )}
 
       {/* Mode PICA (Problem/Identification/Corrective Action) punya bentuk data
           & panel sumber yang sama sekali beda dari Barang Masuk/Keluar/Aset —
@@ -740,7 +765,7 @@ export function WeeklyReportView({ auth }: Props) {
         // Outstanding PR: satu sheet ringkasan untuk seluruh perusahaan (per site, per kategori).
         <OutstandingPrView auth={auth} />
       ) : minStockAktif ? (
-        // Pencapaian Minimum Stok: satu sheet untuk seluruh perusahaan (per minggu, per lokasi).
+        // Pencapaian Safety Stock: satu sheet untuk seluruh perusahaan (per minggu, per lokasi).
         <MinStockView auth={auth} />
       ) : workTargetAktif ? (
         // Work Target: satu sheet untuk seluruh perusahaan (bukan per site) —
@@ -975,39 +1000,67 @@ export function WeeklyReportView({ auth }: Props) {
           </div>
 
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <PanelGrafik judul="Nilai Barang Masuk per Minggu (per vendor)">
+            <PanelGrafik judul="Nilai Barang Masuk per Minggu" tinggi={290}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={masuk.batang.map((r) => ({
-                    ...r,
-                    Total: masuk.vendorTop.reduce((t, v) => t + (Number((r as Record<string, unknown>)[v.name]) || 0), 0),
-                  }))}
-                  margin={{ top: 8, right: 14, left: 4, bottom: 0 }}>
+                <LineChart data={masuk.batang} margin={{ top: 8, right: 14, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} vertical={false} />
                   <XAxis dataKey="minggu" tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={ringkas} tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} width={52} />
                   <Tooltip {...tooltipProps} formatter={fmtTooltip} cursor={{ stroke: W['--wr-cursor'] }} />
-                  <Legend wrapperStyle={{ fontSize: '.7rem' }} formatter={fmtLegend} />
-                  {/* Garis tebal = total semua vendor; garis tipis = per vendor. */}
-                  <Line type="monotone" dataKey="Total" stroke={W['--wr-out']} strokeWidth={2.6} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls />
-                  {masuk.vendorTop.map((v) => (
-                    <Line key={v.name} type="monotone" dataKey={v.name} stroke={rv(v.warna)} strokeWidth={1.6}
-                      dot={{ r: 2 }} activeDot={{ r: 4 }} connectNulls />
-                  ))}
+                  <Line type="monotone" dataKey="Total" name="Nilai Barang Masuk" stroke={W['--wr-out']} strokeWidth={2.6}
+                    dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </PanelGrafik>
 
-            <PanelGrafik judul="Penerimaan per Supplier">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={masuk.pie} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2}>
-                    {masuk.pie.map((d, i) => <Cell key={d.name} fill={rv(masuk.vendorTop[i]?.warna ?? PALET[i % PALET.length])} stroke="transparent" />)}
-                  </Pie>
-                  <Tooltip {...tooltipProps} formatter={fmtTooltip} />
-                  <Legend wrapperStyle={{ fontSize: '.72rem' }} formatter={fmtLegendPie(masuk.pie)} />
-                </PieChart>
-              </ResponsiveContainer>
+            <PanelGrafik judul={`Top 3 Vendor Kontributor · ${siteTerkunci ? labelPenuh(labelSite) : 'PT Reethau Dharma Andalan'}`} tinggi={290}>
+              {topVendor.top.length === 0 ? (
+                <div style={{ height: '100%', display: 'grid', placeItems: 'center', fontSize: '.78rem', color: 'var(--wr-txt-muted)' }}>
+                  Belum ada data penerimaan pada tahun {tahun}.
+                </div>
+              ) : (
+                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '.55rem', overflowY: 'auto' }}>
+                  <label style={{ fontSize: '.72rem', color: 'var(--wr-txt-muted)', display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+                    Bulan
+                    <select value={topVendor.dipilih} onChange={(e) => setBulanVendor(Number(e.target.value))}
+                      className="wr-ctl" style={{ ...kontrol, padding: '.3rem .6rem' }}>
+                      {topVendor.bulanAda.map((m) => <option key={m} value={m}>{NAMA_BULAN[m - 1]} {tahun}</option>)}
+                    </select>
+                    <span style={{ marginLeft: 'auto' }}>
+                      Total <strong style={{ color: NADA.in.teks }}>{rupiahPenuh(topVendor.total)}</strong>
+                    </span>
+                  </label>
+
+                  {topVendor.top.map((v, i) => {
+                    const persen = topVendor.total > 0 ? (v.value / topVendor.total) * 100 : 0;
+                    const lebar = topVendor.top[0].value > 0 ? (v.value / topVendor.top[0].value) * 100 : 0;
+                    return (
+                      <div key={v.name} style={{ display: 'flex', gap: '.65rem', alignItems: 'center', padding: '.5rem .65rem', borderRadius: 12, background: 'var(--wr-tab-bg)', border: '1px solid var(--wr-line)' }}>
+                        <div aria-label={`Peringkat ${i + 1}`}
+                          style={{ width: 28, height: 28, borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0, fontWeight: 800, fontSize: '.8rem', background: SERI[i], color: 'var(--wr-on-in)' }}>
+                          {i + 1}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.5rem', alignItems: 'baseline' }}>
+                            <span title={v.name} style={{ fontSize: '.78rem', fontWeight: 600, color: 'var(--txt-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
+                            <span style={{ fontSize: '.72rem', color: 'var(--wr-txt-muted)', flexShrink: 0 }}>{persen.toFixed(0)}%</span>
+                          </div>
+                          <div style={{ fontSize: '.82rem', fontWeight: 700, color: NADA.in.teks }}>{rupiahPenuh(v.value)}</div>
+                          <div style={{ height: 5, borderRadius: 3, marginTop: 4, background: 'var(--wr-line)' }}>
+                            <div style={{ width: `${lebar}%`, height: '100%', borderRadius: 3, background: SERI[i] }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {topVendor.sisaJumlah > 0 && (
+                    <div style={{ fontSize: '.7rem', color: 'var(--wr-txt-muted)' }}>
+                      + {topVendor.sisaJumlah} vendor lainnya · {rupiahPenuh(topVendor.sisaNilai)}
+                    </div>
+                  )}
+                </div>
+              )}
             </PanelGrafik>
           </div>
 

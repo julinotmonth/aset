@@ -1,4 +1,4 @@
-// Tab "Pencapaian Minimum Stok" di dalam Laporan Mingguan.
+// Menu "Pencapaian Safety Stock" di dalam Laporan Mingguan.
 //
 // Sumber: sheet "Progress_Minimum Stock All MS WS 2026" (tab "Resume ALL Weekly") —
 // per minggu, per kategori (Critical Part / Periodik Maintenance) dan per lokasi:
@@ -200,7 +200,7 @@ export function MinStockView({ auth }: Props) {
       setPayload(p);
       if (p.source?.sheetUrl) setUrlSheet(p.source.sheetUrl);
     } catch (err) {
-      setPesan({ tipe: 'error', teks: err instanceof Error ? err.message : 'Gagal memuat data Minimum Stok.' });
+      setPesan({ tipe: 'error', teks: err instanceof Error ? err.message : 'Gagal memuat data Pencapaian Safety Stock.' });
     } finally { setMemuat(false); }
   }, []);
   useEffect(() => { void muat(); }, [muat]);
@@ -403,14 +403,14 @@ export function MinStockView({ auth }: Props) {
 
       {memuat && (
         <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', padding: '2rem', color: 'var(--wr-txt-muted)' }}>
-          <Loader2 size={16} className="ms-spin" /> Memuat Pencapaian Minimum Stok…
+          <Loader2 size={16} className="ms-spin" /> Memuat Pencapaian Safety Stock…
         </div>
       )}
 
       {!memuat && !data && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)', fontSize: '.85rem' }}>
           <PackageOpen size={34} style={{ opacity: .55, marginBottom: '.6rem' }} />
-          <div style={{ fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.25rem' }}>Belum ada data Pencapaian Minimum Stok</div>
+          <div style={{ fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.25rem' }}>Belum ada data Pencapaian Safety Stock</div>
           {isSuperAdmin ? 'Klik "Sumber Sheet", tempel link tab "Resume ALL Weekly", lalu "Simpan & Sinkronkan".' : 'Hubungi Super Admin untuk mengatur sumber sheet-nya.'}
         </div>
       )}

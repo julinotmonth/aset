@@ -19,7 +19,7 @@ import {
 
 const SEMUA = 'ALL';
 
-type Perhatian = 'garansi' | 'habis' | 'telat';
+export type Perhatian = 'garansi' | 'habis' | 'telat';
 type Urutan = 'terbaru' | 'nama' | 'buku' | 'susut' | 'garansi' | 'umur';
 const URUTAN: { id: Urutan; label: string }[] = [
   { id: 'terbaru', label: 'Terbaru didaftarkan' },
@@ -201,14 +201,18 @@ export const AssetRegistryView: React.FC<{
   onSave: (patch: Partial<FixedAsset>) => void;
   onDelete: (id: string) => void;
   onSaveWorkOrder: (patch: Partial<WorkOrder>) => void;
-}> = ({ fixedAssets, workOrders, onSave, onDelete, onSaveWorkOrder }) => {
+  /** Sembunyikan judul halaman (dipakai saat disematkan di halaman Aset Tetap & Depresiasi). */
+  tanpaHeader?: boolean;
+  /** Filter "perlu perhatian" yang sudah terpasang saat dibuka (mis. dari tombol Tinjau di Ringkasan). */
+  perhatianAwal?: Perhatian | null;
+}> = ({ fixedAssets, workOrders, onSave, onDelete, onSaveWorkOrder, tanpaHeader, perhatianAwal }) => {
   useSitesRefresh();
 
   const [cari, setCari] = useState('');
   const [kategori, setKategori] = useState(SEMUA);
   const [site, setSite] = useState(SEMUA);
   const [status, setStatus] = useState<FixedAsset['status'] | typeof SEMUA>(SEMUA);
-  const [perhatian, setPerhatian] = useState<Perhatian | null>(null);
+  const [perhatian, setPerhatian] = useState<Perhatian | null>(perhatianAwal ?? null);
   const [urutan, setUrutan] = useState<Urutan>('terbaru');
   const [halaman, setHalaman] = useState(1);
 
@@ -319,7 +323,7 @@ export const AssetRegistryView: React.FC<{
   return (
     <>
       <style>{WR_CSS}{EAM_CSS}</style>
-      <PageHeader icon={Building2} title="Aset Tetap & Depresiasi" sub="Registrasi aset modal (mesin, tangki, kendaraan) beserta nilai buku, penyusutan, dan garansinya." />
+      {!tanpaHeader && <PageHeader icon={Building2} title="Aset Tetap & Depresiasi" sub="Registrasi aset modal (mesin, tangki, kendaraan) beserta nilai buku, penyusutan, dan garansinya." />}
 
       <div className="eam-kpis">
         <KpiKartu ikon={Boxes} warna="#00D084" label="Jumlah Aset" nilai={angka(kpi.jumlah)} sub={`${kpi.aktif} aktif · ${kpi.maint} maintenance`} />
