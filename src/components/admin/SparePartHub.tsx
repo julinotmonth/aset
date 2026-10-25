@@ -7,12 +7,12 @@ import { WR_CSS } from './wrTema';
 import { EAM_CSS } from './eamUi';
 import { SparePartKatalog } from './SparePartKatalog';
 
-export function SparePartHub({ auth }: { auth: AuthState }) {
+export function SparePartHub({ auth, cariAwal }: { auth: AuthState; cariAwal?: string }) {
   return (
     <>
       <style>{WR_CSS}{EAM_CSS}</style>
       <PageHeader icon={Package} title="Spare Part" />
-      <SparePartKatalog auth={auth} />
+      <SparePartKatalog auth={auth} cariAwal={cariAwal} />
     </>
   );
 }

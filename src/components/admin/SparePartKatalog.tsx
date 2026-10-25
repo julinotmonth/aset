@@ -30,7 +30,7 @@ const PER_HALAMAN = 20;
 type Kolom = 'kode' | 'nama' | 'masuk' | 'keluar' | 'saldo' | 'hargaRata' | 'nilaiKeluar' | 'terakhir' | 'status';
 const BOBOT_STATUS: Record<StatusSp, number> = { Kritis: 0, 'Cek Stok': 1, Waspada: 2, Aman: 3, 'Tidak Bergerak': 4 };
 
-export function SparePartKatalog({ auth }: { auth: AuthState }) {
+export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal?: string }) {
   const { W } = useWrTema();
   const { rows, memuat, galat, siteTerkunci, muatUlang } = useDataSparePart(auth);
   const sites = getSites();
@@ -39,7 +39,9 @@ export function SparePartKatalog({ auth }: { auth: AuthState }) {
   const [entitas, setEntitas] = useState<'ALL' | Entitas>('ALL');
   const [tahun, setTahun] = useState<'ALL' | number>('ALL');
   const [status, setStatus] = useState<'ALL' | StatusSp>('ALL');
-  const [cari, setCari] = useState('');
+  const [cari, setCari] = useState(cariAwal ?? '');
+  // Berpindah dari menu lain (mis. Jadwal Maintenance) dengan kode tertentu → isi pencarian dengan kode itu.
+  useEffect(() => { if (cariAwal !== undefined) setCari(cariAwal); }, [cariAwal]);
   const [urut, setUrut] = useState<{ k: Kolom; arah: 'asc' | 'desc' }>({ k: 'nilaiKeluar', arah: 'desc' });
   const [hal, setHal] = useState(1);
   const [detail, setDetail] = useState<string | null>(null);

@@ -25,7 +25,6 @@ import { getSites, useSitesRefresh } from '../../data/siteStore';
 import { api } from '../../lib/api';
 import { SparePartHub } from './SparePartHub';
 import { TransferHub } from './TransferHub';
-import { labelSiteDariKey } from './siteLabel';
 import { TransferModal } from './TransferModal';
 import { AddEditSparePartModal } from './AddEditSparePartModal';
 import { UserFormModal } from './UserFormModal';
@@ -54,8 +53,7 @@ import {
 } from './AdminExtraViews';
 import { ReportsView } from './AssetManagementViews';
 import { AsetTetapView } from './AsetTetapView';
-import { WorkOrdersView, type OpsiSelesai } from './WorkOrdersView';
-import { tambahBulan } from './eamHelpers';
+import { JadwalMaintenance, type TujuanNav } from './JadwalMaintenance';
 
 interface AdminDashboardProps {
   auth: AuthState;
@@ -76,6 +74,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   const [laporanMode, setLaporanMode] = useState<LaporanMode>('RINGKASAN_LAPORAN');
   // Tab halaman Aset Tetap & Depresiasi (Ringkasan / Register / Asset Management).
   const [asetTab, setAsetTab] = useState<AsetTab>('RINGKASAN');
+  // Pencarian awal di menu Spare Part (dipakai saat berpindah dari Jadwal Maintenance ke sebuah part).
+  const [cariSparePart, setCariSparePart] = useState('');
+  const bukaDariJadwal = (t: TujuanNav) => {
+    if (t.ke === 'spare-part') { setCariSparePart(t.cari ?? ''); setActiveView('assets'); }
+    else if (t.ke === 'laporan') { setLaporanMode(t.mode); setActiveView('weekly-report'); }
+    else { setAsetTab(t.tab); setActiveView('asset-registry'); }
+  };
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   // ── Theme (dark / light) ────────────────────────────────────────────────
@@ -104,17 +109,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   const [reportsSummary, setReportsSummary] = useState<ReportsSummary | null>(null);
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-
-  const reloadAssetData = async () => {
-    const [assetsRes, workOrdersRes, summaryRes] = await Promise.allSettled([
-      api.get<FixedAsset[]>('/fixed-assets'),
-      api.get<WorkOrder[]>('/work-orders'),
-      api.get<ReportsSummary>('/reports/summary'),
-    ]);
-    if (assetsRes.status === 'fulfilled') setFixedAssets(assetsRes.value);
-    if (workOrdersRes.status === 'fulfilled') setWorkOrders(workOrdersRes.value);
-    if (summaryRes.status === 'fulfilled') setReportsSummary(summaryRes.value);
-  };
 
   // Spare parts / logs / (for Super Admins) users now live in the backend —
   // fetch them once on mount instead of reading localStorage. `users` 404s
@@ -378,106 +372,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
     }
   };
 
-  // ── Work Orders (Scheduled Maintenance) ──────────────────────────────────
-  const handleSaveWorkOrder = async (patch: Partial<WorkOrder>) => {
-    try {
-      if (patch.id) {
-        const updated = await api.patch<WorkOrder>(`/work-orders/${encodeURIComponent(patch.id)}`, patch);
-        setWorkOrders((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
-        showToast('Work order berhasil diperbarui.');
-      } else {
-        const created = await api.post<WorkOrder>('/work-orders', patch);
-        setWorkOrders((prev) => [created, ...prev]);
-        showToast(`Pekerjaan "${created.title}" berhasil dijadwalkan.`);
-      }
-      reloadAssetData();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Gagal menyimpan work order.');
-    }
-  };
-
-  // Sinkronkan status aset dengan pekerjaan maintenance-nya: aset "Active" menjadi
-  // "Under Maintenance" saat ada pekerjaan In Progress, dan kembali "Active" bila
-  // sudah tidak ada. Status Retired/Disposed tidak pernah diubah otomatis.
-  const sinkronStatusAset = async (assetId: string, woSetelah: WorkOrder[]) => {
-    const aset = fixedAssets.find((a) => a.id === assetId);
-    if (!aset || (aset.status !== 'Active' && aset.status !== 'Under Maintenance')) return;
-    const adaDikerjakan = woSetelah.some((w) => w.assetId === assetId && w.status === 'In Progress');
-    const target: FixedAsset['status'] = adaDikerjakan ? 'Under Maintenance' : 'Active';
-    if (target === aset.status) return;
-    const updated = await api.patch<FixedAsset>(`/fixed-assets/${encodeURIComponent(assetId)}`, { status: target });
-    setFixedAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-  };
-
-  const catatWo = async (description: string, site?: string) => {
-    const log = await api.post<ActivityLog>('/logs', { action: 'WORK_ORDER', description, performedBy: auth.username, siteFrom: site });
-    setLogs((prev) => [log, ...prev]);
-  };
-
-  const handleStartWorkOrder = async (id: string) => {
-    const wo = workOrders.find((w) => w.id === id);
-    if (!wo) return;
-    try {
-      const updated = await api.patch<WorkOrder>(`/work-orders/${encodeURIComponent(id)}`, { status: 'In Progress' });
-      const sesudah = workOrders.map((w) => (w.id === updated.id ? updated : w));
-      setWorkOrders(sesudah);
-      await sinkronStatusAset(wo.assetId, sesudah);
-      const aset = fixedAssets.find((a) => a.id === wo.assetId);
-      await catatWo(`Pekerjaan maintenance dimulai: ${wo.title}${aset ? ` — ${aset.name} (${aset.assetCode}) di ${labelSiteDariKey(aset.site)}` : ''}`, aset?.site);
-      showToast(`Pekerjaan "${wo.title}" mulai dikerjakan.`);
-      reloadAssetData();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Gagal memulai pekerjaan.');
-    }
-  };
-
-  const handleCompleteWorkOrder = async (id: string, opsi: OpsiSelesai) => {
-    const wo = workOrders.find((w) => w.id === id);
-    if (!wo) return;
-    try {
-      let updated = await api.post<WorkOrder>(`/work-orders/${encodeURIComponent(id)}/complete`, { completedDate: opsi.completedDate });
-      if (opsi.note) {
-        const catatan = [wo.notes?.trim(), `Selesai ${opsi.completedDate}: ${opsi.note}`].filter(Boolean).join('\n');
-        updated = await api.patch<WorkOrder>(`/work-orders/${encodeURIComponent(id)}`, { notes: catatan });
-      }
-      let sesudah = workOrders.map((w) => (w.id === updated.id ? updated : w));
-
-      // Pekerjaan preventive berulang: buat jadwal berikutnya dengan data yang sama.
-      let berikutnya: WorkOrder | null = null;
-      if (opsi.nextInMonths > 0) {
-        berikutnya = await api.post<WorkOrder>('/work-orders', {
-          assetId: wo.assetId, title: wo.title, type: wo.type, priority: wo.priority,
-          dueDate: tambahBulan(opsi.completedDate, opsi.nextInMonths), assignedTo: wo.assignedTo, notes: '',
-        });
-        sesudah = [berikutnya, ...sesudah];
-      }
-      setWorkOrders(sesudah);
-      await sinkronStatusAset(wo.assetId, sesudah);
-
-      const aset = fixedAssets.find((a) => a.id === wo.assetId);
-      await catatWo(`Pekerjaan maintenance selesai: ${wo.title}${aset ? ` — ${aset.name} (${aset.assetCode}) di ${labelSiteDariKey(aset.site)}` : ''}`, aset?.site);
-      showToast(berikutnya ? `Pekerjaan selesai. Jadwal berikutnya: ${berikutnya.dueDate}.` : 'Work order ditandai selesai.');
-      reloadAssetData();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Gagal menyelesaikan work order.');
-    }
-  };
-
-  const handleDeleteWorkOrder = async (id: string) => {
-    const wo = workOrders.find((w) => w.id === id);
-    if (!confirm(`Hapus pekerjaan "${wo?.title ?? 'ini'}"?`)) return;
-    try {
-      await api.delete(`/work-orders/${encodeURIComponent(id)}`);
-      const sesudah = workOrders.filter((w) => w.id !== id);
-      setWorkOrders(sesudah);
-      if (wo) await sinkronStatusAset(wo.assetId, sesudah);
-      showToast('Work order dihapus.');
-      reloadAssetData();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Gagal menghapus work order.');
-    }
-  };
-
   if (isDataLoading) {
     return (
       <div className="admin-shell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
@@ -701,7 +595,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         )}
 
         {activeView === 'assets' && (
-          <SparePartHub auth={auth} />
+          <SparePartHub auth={auth} cariAwal={cariSparePart} />
         )}
 
         {activeView === 'global-search' && (
@@ -722,16 +616,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         {activeView === 'asset-registry' && (
           <AsetTetapView auth={auth} tab={asetTab} onTabChange={setAsetTab} />
         )}
-        {activeView === 'work-orders' && (
-          <WorkOrdersView
-            workOrders={workOrders}
-            fixedAssets={fixedAssets}
-            onSave={handleSaveWorkOrder}
-            onStart={handleStartWorkOrder}
-            onComplete={handleCompleteWorkOrder}
-            onDelete={handleDeleteWorkOrder}
-          />
-        )}
+        {activeView === 'work-orders' && <JadwalMaintenance auth={auth} onNavigasi={bukaDariJadwal} />}
         {activeView === 'reports' && (
           <ReportsView summary={reportsSummary} fixedAssets={fixedAssets} workOrders={workOrders} />
         )}

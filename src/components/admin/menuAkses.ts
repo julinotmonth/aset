@@ -7,7 +7,7 @@
 // Untuk membuka kunci sebuah menu, cukup tambahkan id-nya ke MENU_TERBUKA.
 import type { AdminView } from './Sidebar';
 
-export const MENU_TERBUKA: AdminView[] = ['weekly-report', 'asset-registry', 'assets', 'assignments'];
+export const MENU_TERBUKA: AdminView[] = ['weekly-report', 'asset-registry', 'assets', 'assignments', 'work-orders'];
 
 /** Halaman yang dibuka pertama kali setelah login. Harus menu yang terbuka. */
 export const MENU_AWAL: AdminView = 'weekly-report';

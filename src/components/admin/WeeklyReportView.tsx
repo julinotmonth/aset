@@ -49,6 +49,8 @@ interface WeeklyRow {
   harga: number; totalHarga: number; noMr: string; genBus: string;
   statusSmr: string; noShipment: string; keterangan: string; section: Section;
   jenis: string; merk: string; tipe: string; hargaEstimasi?: number;
+  /** Diisi server bila nilai aset diambil dari kode yang sama di Barang Masuk/Keluar. */
+  sumberHarga?: { metode: 'kode'; arah: 'IN' | 'OUT'; site: string; tanggal: string | null; kode: string; namaBarang: string };
 }
 
 interface SheetSource {
@@ -653,7 +655,10 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
         <td style={tdAngka}>{r.jumlah.toLocaleString('id-ID')} {r.satuan}</td>
         <td style={{ ...tdAngka, fontWeight: 600 }}>
           {r.totalHarga
-            ? rupiahPenuh(r.totalHarga)
+            ? (r.sumberHarga
+              ? <span style={{ cursor: 'help', borderBottom: '1px dotted currentColor' }}
+                  title={`Nilai diambil dari kode ${r.sumberHarga.kode} di ${r.sumberHarga.arah === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} ${labelSiteDariKey(r.sumberHarga.site)}${r.sumberHarga.tanggal ? ` (${r.sumberHarga.tanggal})` : ''}.`}>{rupiahPenuh(r.totalHarga)}</span>
+              : rupiahPenuh(r.totalHarga))
             : r.hargaEstimasi
               ? <span title="Diestimasi dari pembelian dengan nama & tanggal terdekat di Barang Masuk — bukan harga tercatat langsung, karena sheet aset tidak punya kolom harga." style={{ fontStyle: 'italic', fontWeight: 500, cursor: 'help' }}>≈ {rupiahPenuh(r.hargaEstimasi)}</span>
               : '-'}
