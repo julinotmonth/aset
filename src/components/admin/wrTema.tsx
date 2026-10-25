@@ -62,7 +62,8 @@ export const fmtLegendPie = (data: { name: string; value: number }[]) => {
 // dibaca ulang saat atribut tema di <html> berganti.
 const WR_VARS = ['--wr-in', '--wr-out', '--wr-aset', '--wr-warn', '--wr-info', '--wr-c6', '--wr-c7', '--wr-c8',
   '--wr-neutral', '--wr-in-text', '--wr-neg', '--wr-txt-muted', '--wr-grid', '--wr-cursor', '--wr-cursor-fill',
-  '--wr-seg-gap'] as const;
+  '--wr-seg-gap', '--wr-pie-in', '--wr-pie-out', '--wr-pie-aset', '--wr-pie-warn', '--wr-pie-info', '--wr-pie-c6', '--wr-pie-c7',
+  '--wr-pie-c8', '--wr-pie-neutral'] as const;
 export type WrWarna = Record<(typeof WR_VARS)[number], string>;
 const bacaWarna = (): WrWarna => {
   const cs = getComputedStyle(document.documentElement);
@@ -82,6 +83,8 @@ export interface WrTema {
   W: WrWarna;
   /** Ubah 'var(--wr-x)' menjadi nilai hasil-hitungnya untuk atribut SVG recharts. */
   rv: (v: string) => string;
+  /** Seperti `rv`, tetapi memakai warna isi pie yang lebih lembut di mode terang ('var(--wr-in)' → --wr-pie-in). */
+  pie: (v: string) => string;
 }
 export function useWrTema(): WrTema {
   const W = useWrWarna();
@@ -89,7 +92,11 @@ export function useWrTema(): WrTema {
     const m = /^var\((--[\w-]+)\)$/.exec(v);
     return (m && (W as Record<string, string>)[m[1]]) || v;
   };
-  return { W, rv };
+  const pie = (v: string) => {
+    const m = /^var\(--wr-([\w]+)\)$/.exec(v);
+    return (m && (W as Record<string, string>)[`--wr-pie-${m[1]}`]) || rv(v);
+  };
+  return { W, rv, pie };
 }
 
 // Gaya bersama: kontrol, tombol, tab, tabel. Hover/focus/zebra tidak bisa

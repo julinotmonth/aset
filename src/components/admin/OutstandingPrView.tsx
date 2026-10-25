@@ -86,7 +86,7 @@ interface Props { auth: AuthState }
 
 export function OutstandingPrView({ auth }: Props) {
   const isSuperAdmin = auth.role === 'Super Admin';
-  const { W, rv } = useWrTema();
+  const { W, rv, pie } = useWrTema();
 
   const [payload, setPayload] = useState<OsPayload | null>(null);
   const [memuat, setMemuat] = useState(true);
@@ -131,7 +131,7 @@ export function OutstandingPrView({ auth }: Props) {
   const data = payload?.data ?? null;
   const kats = useMemo(() => data?.categories ?? [], [data]);
   const aktif = kats.includes(kategori) ? kategori : SEMUA;
-  const warna = useCallback((k: string) => rv(SERI_PANJANG[Math.max(0, kats.indexOf(k)) % SERI_PANJANG.length]), [rv, kats]);
+  const warna = useCallback((k: string) => pie(SERI_PANJANG[Math.max(0, kats.indexOf(k)) % SERI_PANJANG.length]), [pie, kats]);
 
   const barisSite = useMemo(() => {
     if (!data) return [];

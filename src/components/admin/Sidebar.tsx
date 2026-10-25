@@ -27,7 +27,7 @@ import {
   Boxes,
   ChevronDown,
   PieChart,
-  Table2,
+  Gauge,
 } from 'lucide-react';
 
 export type AdminView =
@@ -49,10 +49,10 @@ export type AdminView =
   | 'users';
 
 /** Mode isi halaman Laporan Mingguan (dipilih lewat sub-menu sidebar atau tab di halaman). */
-export type LaporanMode = 'WORK_TARGET' | 'IN' | 'OUT' | 'OS_PR' | 'MIN_STOCK' | 'ASET' | 'PICA';
+export type LaporanMode = 'RINGKASAN_LAPORAN' | 'WORK_TARGET' | 'IN' | 'OUT' | 'OS_PR' | 'MIN_STOCK' | 'ASET' | 'PICA';
 
 /** Tab di halaman Aset Tetap & Depresiasi (dipilih lewat sub-menu sidebar atau tab di halaman). */
-export type AsetTab = 'RINGKASAN' | 'REGISTER' | 'ASSET_MGMT';
+export type AsetTab = 'RINGKASAN' | 'ASSET_MGMT';
 
 type ItemSub = { id: string; label: string; icon: React.ElementType };
 const SUB_DASHBOARD: ItemSub[] = [
@@ -60,6 +60,7 @@ const SUB_DASHBOARD: ItemSub[] = [
   { id: 'PICA', label: 'PICA', icon: ClipboardList },
 ];
 const SUB_LAPORAN: ItemSub[] = [
+  { id: 'RINGKASAN_LAPORAN', label: 'Ringkasan Laporan', icon: Gauge },
   { id: 'IN', label: 'Barang Masuk', icon: TrendingUp },
   { id: 'OUT', label: 'Barang Keluar', icon: TrendingDown },
   { id: 'OS_PR', label: 'Outstanding PR', icon: FileText },
@@ -67,7 +68,6 @@ const SUB_LAPORAN: ItemSub[] = [
 ];
 const SUB_ASET: ItemSub[] = [
   { id: 'RINGKASAN', label: 'Ringkasan Aset', icon: PieChart },
-  { id: 'REGISTER', label: 'Register & Depresiasi', icon: Table2 },
   { id: 'ASSET_MGMT', label: 'Asset Management', icon: Boxes },
 ];
 
@@ -107,7 +107,7 @@ const NAV_GROUPS: { title: string; items: { id: AdminView; label: string; icon: 
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'global-search', label: 'Global Search', icon: Search },
       { id: 'reports', label: 'Laporan', icon: BarChart3 },
-      { id: 'weekly-report', label: 'Laporan Mingguan', icon: CalendarRange },
+      { id: 'weekly-report', label: 'Laporan', icon: CalendarRange },
     ],
   },
   {
@@ -197,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ active, onNavigate, isOpen, on
   if (onNavigateLaporan) {
     const pilih = (id: string) => onNavigateLaporan(id as LaporanMode);
     grupSub.dashboard = { view: 'weekly-report', awal: 'WORK_TARGET', items: SUB_DASHBOARD, aktifId: laporanMode, pilih };
-    grupSub['weekly-report'] = { view: 'weekly-report', awal: 'OUT', items: SUB_LAPORAN, aktifId: laporanMode, pilih };
+    grupSub['weekly-report'] = { view: 'weekly-report', awal: 'RINGKASAN_LAPORAN', items: SUB_LAPORAN, aktifId: laporanMode, pilih };
   }
   if (onNavigateAset) {
     grupSub['asset-registry'] = {

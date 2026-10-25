@@ -23,8 +23,8 @@ import type { AuthState, SparePart, SiteFilter, ActivityLog, SiteLocation, AppUs
 import { getSparePartCategories } from '../../data/categoryStore';
 import { getSites, useSitesRefresh } from '../../data/siteStore';
 import { api } from '../../lib/api';
-import { SparePartView } from './SparePartView';
-import { hitungStatusStok } from './sparePartStatus';
+import { SparePartHub } from './SparePartHub';
+import { TransferHub } from './TransferHub';
 import { labelSiteDariKey } from './siteLabel';
 import { TransferModal } from './TransferModal';
 import { AddEditSparePartModal } from './AddEditSparePartModal';
@@ -35,6 +35,7 @@ import { MENU_AWAL, menuTerbuka } from './menuAkses';
 import { usePerubahanLaporan, waktuMs } from './weeklyChanges';
 import { NotifPerubahanLaporan } from './NotifPerubahanLaporan';
 import { WeeklyReportView } from './WeeklyReportView';
+import { LaporanRingkasan } from './LaporanRingkasan';
 import {
   GlobalSearchView,
   CategoriesView,
@@ -71,8 +72,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   // Satu-satunya jalan pindah menu (sidebar, Global Search, notifikasi): menu
   // yang terkunci diabaikan di sini, jadi tidak ada jalur yang bisa membukanya.
   const setActiveView = (view: AdminView) => { if (menuTerbuka(view)) setActiveViewRaw(view); };
-  // Isi halaman Laporan Mingguan (Barang Masuk/Keluar, Outstanding PR, Safety Stock, dst.).
-  const [laporanMode, setLaporanMode] = useState<LaporanMode>('OUT');
+  // Isi halaman Laporan (Ringkasan, Barang Masuk/Keluar, Outstanding PR, Safety Stock) dan Dashboard (Work Target, PICA).
+  const [laporanMode, setLaporanMode] = useState<LaporanMode>('RINGKASAN_LAPORAN');
   // Tab halaman Aset Tetap & Depresiasi (Ringkasan / Register / Asset Management).
   const [asetTab, setAsetTab] = useState<AsetTab>('RINGKASAN');
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
@@ -222,13 +223,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
     }
   };
 
-  const [currentSite, setCurrentSite] = useState<SiteFilter>(auth.assignedSite || 'global');
-  const [categoryOptions, setCategoryOptions] = useState<string[]>(getSparePartCategories());
+  const [currentSite] = useState<SiteFilter>(auth.assignedSite || 'global');
+  const [, setCategoryOptions] = useState<string[]>(getSparePartCategories());
 
   const [isAddEditOpen, setIsAddEditOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<SparePart | null>(null);
+  const [editingItem] = useState<SparePart | null>(null);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
-  const [transferringItem, setTransferringItem] = useState<SparePart | null>(null);
+  const [transferringItem] = useState<SparePart | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // ── Notifications ────────────────────────────────────────────────────────
@@ -374,73 +375,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
       showToast(`${item.name} ditandai selesai maintenance.`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Gagal menyelesaikan maintenance.');
-    }
-  };
-
-  // Penyesuaian stok cepat (tombol − / + di tabel Spare Part): ubah stok, hitung ulang
-  // status, lalu catat ke Audit / Log. Stok tidak pernah turun di bawah 0.
-  const handleAdjustStock = async (item: SparePart, delta: number) => {
-    const current = spareParts.find((p) => p.id === item.id) ?? item;
-    const newStock = Math.max(0, current.stock + delta);
-    if (newStock === current.stock) return;
-    try {
-      const updated = await api.patch<SparePart>(`/spare-parts/${encodeURIComponent(current.id)}`, {
-        stock: newStock,
-        status: hitungStatusStok(newStock, current.minStock, current.status),
-      });
-      setSpareParts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-      const newLog = await api.post<ActivityLog>('/logs', {
-        action: 'STOCK_UPDATE',
-        description: `Penyesuaian stok ${current.name} (${current.sku}) di ${labelSiteDariKey(current.site)}: ${current.stock} → ${newStock} ${current.unit}`,
-        performedBy: auth.username,
-        siteFrom: current.site,
-      });
-      setLogs((prev) => [newLog, ...prev]);
-      showToast(`Stok ${current.name}: ${current.stock} → ${newStock} ${current.unit}.`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Gagal mengubah stok.');
-    }
-  };
-
-  const handleDeleteSparePart = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus data spare part ini?')) return;
-    const target = spareParts.find((p) => p.id === id);
-    try {
-      await api.delete(`/spare-parts/${encodeURIComponent(id)}`);
-      setSpareParts((prev) => prev.filter((p) => p.id !== id));
-      if (target) showToast(`Spare part ${target.name} dihapus.`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Gagal menghapus spare part.');
-    }
-  };
-
-  // ── Fixed Assets (Asset Registry / Depreciation) ─────────────────────────
-  const handleSaveFixedAsset = async (patch: Partial<FixedAsset>) => {
-    try {
-      if (patch.id) {
-        const updated = await api.patch<FixedAsset>(`/fixed-assets/${encodeURIComponent(patch.id)}`, patch);
-        setFixedAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-        showToast(`Aset ${updated.assetCode} berhasil diperbarui.`);
-      } else {
-        const created = await api.post<FixedAsset>('/fixed-assets', { ...patch, performedBy: auth.username });
-        setFixedAssets((prev) => [created, ...prev]);
-        showToast(`Aset tetap baru "${created.name}" berhasil didaftarkan.`);
-      }
-      reloadAssetData();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Gagal menyimpan aset tetap.');
-    }
-  };
-
-  const handleDeleteFixedAsset = async (id: string) => {
-    const target = fixedAssets.find((a) => a.id === id);
-    try {
-      await api.delete(`/fixed-assets/${encodeURIComponent(id)}`);
-      setFixedAssets((prev) => prev.filter((a) => a.id !== id));
-      if (target) showToast(`Aset ${target.name} dihapus.`);
-      reloadAssetData();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Gagal menghapus aset. Pastikan tidak ada work order aktif yang terkait.');
     }
   };
 
@@ -767,17 +701,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         )}
 
         {activeView === 'assets' && (
-          <SparePartView
-            spareParts={spareParts}
-            categoryOptions={categoryOptions}
-            site={currentSite}
-            onSiteChange={setCurrentSite}
-            onAdd={() => { setEditingItem(null); setIsAddEditOpen(true); }}
-            onEdit={(item) => { setEditingItem(item); setIsAddEditOpen(true); }}
-            onTransfer={(item) => { setTransferringItem(item); setIsTransferOpen(true); }}
-            onDelete={handleDeleteSparePart}
-            onAdjustStock={handleAdjustStock}
-          />
+          <SparePartHub auth={auth} />
         )}
 
         {activeView === 'global-search' && (
@@ -785,7 +709,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         )}
         {activeView === 'categories' && <CategoriesView spareParts={spareParts} />}
         {activeView === 'assignments' && (
-          <AssignmentsView spareParts={spareParts} logs={logs} onConfirmTransfer={handleConfirmTransfer} />
+          <TransferHub auth={auth} riwayat={
+            <AssignmentsView tanpaHeader spareParts={spareParts} logs={logs} onConfirmTransfer={handleConfirmTransfer} />} />
         )}
         {activeView === 'maintenance' && (
           <MaintenanceView
@@ -795,8 +720,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           />
         )}
         {activeView === 'asset-registry' && (
-          <AsetTetapView auth={auth} fixedAssets={fixedAssets} workOrders={workOrders} tab={asetTab} onTabChange={setAsetTab}
-            onSave={handleSaveFixedAsset} onDelete={handleDeleteFixedAsset} onSaveWorkOrder={handleSaveWorkOrder} />
+          <AsetTetapView auth={auth} tab={asetTab} onTabChange={setAsetTab} />
         )}
         {activeView === 'work-orders' && (
           <WorkOrdersView
@@ -811,7 +735,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         {activeView === 'reports' && (
           <ReportsView summary={reportsSummary} fixedAssets={fixedAssets} workOrders={workOrders} />
         )}
-        {activeView === 'weekly-report' && <WeeklyReportView auth={auth} mode={laporanMode} />}
+        {activeView === 'weekly-report' && (laporanMode === 'RINGKASAN_LAPORAN'
+          ? <LaporanRingkasan auth={auth} onBuka={(m) => setLaporanMode(m)} />
+          : <WeeklyReportView auth={auth} mode={laporanMode} />)}
         {activeView === 'audit' && <AuditView logs={logs} />}
         {activeView === 'branches' && (
           <BranchesView spareParts={spareParts} onSitesChanged={() => setSitesVersion((v) => v + 1)} />

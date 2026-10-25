@@ -29,6 +29,8 @@ import {
 } from 'recharts';
 import type { AuthState } from '../../types';
 import type { LaporanMode } from './Sidebar';
+import { labelSiteDariKey } from './siteLabel';
+import { SumberSemuaSite } from './SumberSemuaSite';
 import { api } from '../../lib/api';
 import { getSites } from '../../data/siteStore';
 import { PicaView } from './PicaView';
@@ -53,6 +55,16 @@ interface SheetSource {
   site: string; sheetId: string; tabs: string[];
   autoSync: boolean; lastSyncAt: string | null; lastStatus: string;
 }
+
+interface PeringatanTab { tab: string; siteLain: string; labelLain: string }
+interface RingkasanData { site: string; direction: 'IN' | 'OUT' | 'ASET'; jumlah: number; tahunMin: number | null; tahunMax: number | null; tanpaTahun: number }
+
+/** Kalimat peringatan bila tab di pengaturan sebuah site ternyata milik site lain. */
+const teksPeringatan = (p: PeringatanTab[] | undefined, namaSite: string): string => {
+  if (!p?.length) return '';
+  const daftar = p.map((x) => `“${x.tab}” (tampaknya milik ${labelPenuh(x.labelLain)})`).join(', ');
+  return `${daftar} ada di pengaturan ${namaSite}, sehingga datanya disimpan ke ${namaSite}, bukan ke site aslinya. Pindahkan tab itu ke pengaturan site yang benar, atau pakai “Hubungkan Semua Site”.`;
+};
 
 // ── Konstanta layout laporan ──────────────────────────────────────────────
 const SECTIONS: ({ key: Section; judul: string; totalLabel: string } & Nada)[] = [
@@ -119,11 +131,6 @@ const NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
 const PALET = SERI;
-
-// Pola garis berbeda per seksi — pembeda selain warna (WCAG 1.4.1).
-const GARIS_SEKSI: Record<Section, string | undefined> = {
-  MAINT: undefined, OH: '7 4', OLI: '2 3', LAIN: '10 3 2 3', ISOTANK: '1 5',
-};
 
 // Palet warna untuk membedakan vendor/supplier di grafik Barang Masuk —
 // jumlah vendor dinamis (beda-beda tiap site/minggu), jadi dipetakan bergilir
@@ -244,8 +251,9 @@ function PanelGrafik({ judul, children, tinggi = 250 }: { judul: string; childre
 // Judul halaman mengikuti menu yang dibuka dari sidebar.
 const TEKS_MASUK_KELUAR = 'Rekap penggunaan part, overhaul, oli, dan biaya lain-lain per minggu untuk setiap Mother Station, ditarik langsung dari Google Spreadsheet milik site.';
 const JUDUL_MODE: Record<LaporanMode, { judul: string; sub: string }> = {
-  IN: { judul: 'Laporan Mingguan Barang Masuk & Keluar', sub: TEKS_MASUK_KELUAR },
-  OUT: { judul: 'Laporan Mingguan Barang Masuk & Keluar', sub: TEKS_MASUK_KELUAR },
+  RINGKASAN_LAPORAN: { judul: 'Ringkasan Laporan', sub: 'Gambaran garis besar barang masuk, barang keluar, Outstanding PR, dan Safety Stock.' },
+  IN: { judul: 'Laporan Barang Masuk', sub: 'Rekap penerimaan barang per minggu untuk setiap Mother Station, ditarik langsung dari Google Spreadsheet milik site.' },
+  OUT: { judul: 'Laporan Barang Keluar', sub: TEKS_MASUK_KELUAR },
   OS_PR: { judul: 'Outstanding PR', sub: 'Purchase request yang belum selesai per site dan per kategori.' },
   MIN_STOCK: { judul: 'Pencapaian Safety Stock', sub: 'Pencapaian pemenuhan safety stock per minggu dan per lokasi.' },
   WORK_TARGET: { judul: 'Work Target / KPI', sub: 'Target kerja dan pencapaian KPI seluruh perusahaan.' },
@@ -301,10 +309,16 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
   const [menyinkron, setMenyinkron] = useState(false);
   const [pesan, setPesan] = useState<{ tipe: 'ok' | 'error'; teks: string } | null>(null);
   const [panelSumberTerbuka, setPanelSumberTerbuka] = useState(false);
+  const [semuaSiteTerbuka, setSemuaSiteTerbuka] = useState(false);
   const [urlSheet, setUrlSheet] = useState('');
   const [tabsInput, setTabsInput] = useState('');
+  // Form sumber hanya diisi ulang dari server saat site berganti atau belum pernah diketik.
+  // Tanpa ini, penyegaran otomatis (tiap 30 detik) menimpa ketikan pengguna dengan isi tersimpan.
+  const formKotor = useRef(false);
+  const formUntukSite = useRef('');
+  const [overview, setOverview] = useState<RingkasanData[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const { W, rv } = useWrTema();
+  const { W, pie } = useWrTema();
 
   const siteTerkunci = !isSuperAdmin && auth.assignedSite !== 'global';
   const labelSite = sites.find((s) => s.key === site)?.label ?? site;
@@ -330,8 +344,11 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
       setDataVendor(vendorSetahun);
       setVolumes(Object.fromEntries(vol.map((v) => [v.minggu, v.m3])));
       setSource(src);
-      if (src) { setUrlSheet(`https://docs.google.com/spreadsheets/d/${src.sheetId}/edit`); setTabsInput(src.tabs.join('\n')); }
-      else { setUrlSheet(''); setTabsInput(TAB_DEFAULT(site).join('\n')); }
+      if (formUntukSite.current !== site) { formKotor.current = false; formUntukSite.current = site; }
+      if (!formKotor.current) {
+        if (src) { setUrlSheet(`https://docs.google.com/spreadsheets/d/${src.sheetId}/edit`); setTabsInput(src.tabs.join('\n')); }
+        else { setUrlSheet(''); setTabsInput(TAB_DEFAULT(site).join('\n')); }
+      }
     } catch (err) {
       setPesan({ tipe: 'error', teks: (err as Error).message });
     } finally {
@@ -393,12 +410,10 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
   );
 
   // Data grafik mode KELUAR: batang bertumpuk per minggu + pie komposisi seksi.
+  // Satu garis: total biaya semua kategori per minggu (rincian per kategori ada di kartu & donat).
   const dataBatangKeluar = useMemo(() => mingguList.map((m) => ({
     minggu: `W${m}`,
-    'Part Maintenance': totalSeksi.MAINT[m] ?? 0,
-    Overhold: totalSeksi.OH[m] ?? 0,
-    'Consumption OLI': totalSeksi.OLI[m] ?? 0,
-    'Lain-Lain': totalSeksi.LAIN[m] ?? 0,
+    Total: SECTIONS.reduce((t, s) => t + (totalSeksi[s.key][m] ?? 0), 0),
   })), [mingguList, totalSeksi]);
 
   const dataPieKeluar = useMemo(() => SECTIONS
@@ -676,9 +691,11 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
   const simpanSumber = async () => {
     const tabs = tabsInput.split('\n').map((t) => t.trim()).filter(Boolean);
     try {
-      const src = await api.post<SheetSource>('/weekly-reports/source', { site, sheetUrl: urlSheet, tabs, autoSync: true });
+      const src = await api.post<SheetSource & { peringatan?: PeringatanTab[] }>('/weekly-reports/source', { site, sheetUrl: urlSheet, tabs, autoSync: true });
+      formKotor.current = false;
       setSource(src);
-      setPesan({ tipe: 'ok', teks: 'Sumber spreadsheet tersimpan. Klik "Sync Sekarang" untuk menarik data.' });
+      const w = teksPeringatan(src.peringatan, labelPenuh(labelSite));
+      setPesan(w ? { tipe: 'error', teks: `Sumber tersimpan, tetapi ${w}` } : { tipe: 'ok', teks: 'Sumber spreadsheet tersimpan. Klik "Sync Sekarang" untuk menarik data.' });
       setPanelSumberTerbuka(false);
     } catch (err) { setPesan({ tipe: 'error', teks: (err as Error).message }); }
   };
@@ -686,13 +703,15 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
   const sinkronkan = async () => {
     setMenyinkron(true); setPesan(null);
     try {
-      const hasil = await api.post<{ hasil: { tab: string; total?: number; error?: string }[] }>(
+      const hasil = await api.post<{ hasil: { tab: string; total?: number; arah?: string; error?: string }[]; peringatan?: PeringatanTab[] }>(
         '/weekly-reports/sync', { site });
       const gagal = hasil.hasil.filter((h) => h.error);
       const jumlah = hasil.hasil.reduce((s, h) => s + (h.total ?? 0), 0);
-      setPesan(gagal.length
-        ? { tipe: 'error', teks: `${jumlah} baris tersinkron, ${gagal.length} tab gagal: ${gagal.map((g) => `${g.tab} — ${g.error}`).join('; ')}` }
-        : { tipe: 'ok', teks: `${jumlah} baris berhasil disinkronkan dari Google Spreadsheet.` });
+      const rincian = hasil.hasil.filter((h) => !h.error).map((h) => `${h.tab}: ${h.total ?? 0} baris ${h.arah === 'IN' ? 'masuk' : h.arah === 'OUT' ? 'keluar' : h.arah === 'ASET' ? 'aset' : ''}`.trim()).join(' · ');
+      const w = teksPeringatan(hasil.peringatan, labelPenuh(labelSite));
+      setPesan(gagal.length || w
+        ? { tipe: 'error', teks: `${jumlah} baris tersinkron${gagal.length ? `, ${gagal.length} tab gagal: ${gagal.map((g) => `${g.tab} — ${g.error}`).join('; ')}` : ''}.${w ? ` Perhatian: ${w}` : ''}` }
+        : { tipe: 'ok', teks: `${jumlah} baris berhasil disinkronkan${rincian ? ` (${rincian})` : ''}.` });
       await muatData(true);
     } catch (err) { setPesan({ tipe: 'error', teks: (err as Error).message }); }
     finally { setMenyinkron(false); }
@@ -747,6 +766,32 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
   const tombol: CSSProperties = { display: 'flex', alignItems: 'center', gap: '.4rem', padding: '.5rem .85rem', borderRadius: 10, cursor: 'pointer' };
 
   const kosong = !memuat && !rows.length;
+
+  // Saat layar kosong, ambil ringkasan isi database supaya jelas data yang sudah disinkronkan tersimpan di mana
+  // (site/arah/tahun lain), bukan sekadar "belum ada data".
+  useEffect(() => {
+    if (!kosong) return;
+    let batal = false;
+    api.get<RingkasanData[]>('/weekly-reports/overview').then((d) => { if (!batal) setOverview(d); }).catch(() => { if (!batal) setOverview([]); });
+    return () => { batal = true; };
+  }, [kosong, site, arah, tahun]);
+  const petunjukKosong = useMemo(() => {
+    const NAMA: Record<string, string> = { IN: 'Barang Masuk', OUT: 'Barang Keluar', ASET: 'Aset' };
+    const rentang = (o: RingkasanData) => (o.tahunMin ? (o.tahunMin === o.tahunMax ? ` (tahun ${o.tahunMin})` : ` (tahun ${o.tahunMin}–${o.tahunMax})`) : '');
+    const t: string[] = [];
+    const siteIni = overview.filter((o) => o.site === site);
+    for (const o of siteIni) {
+      if (o.direction === arah) {
+        t.push(`${labelPenuh(labelSite)} punya ${o.jumlah.toLocaleString('id-ID')} baris ${NAMA[o.direction]}${rentang(o)} — ${arah === 'ASET' ? 'cek sinkronisasi' : `ubah filter Tahun/Bulan di atas (sekarang ${tahun}${bulan ? `, bulan ${bulan}` : ''})`}.`);
+        if (o.tanpaTahun) t.push(`${o.tanpaTahun.toLocaleString('id-ID')} baris tidak punya tahun yang terbaca, jadi tidak muncul di filter tahun mana pun — cek kolom Tanggal/Tahun di sheet.`);
+      } else t.push(`${labelPenuh(labelSite)} hanya punya data ${NAMA[o.direction]}: ${o.jumlah.toLocaleString('id-ID')} baris${rentang(o)}.`);
+    }
+    if (!siteIni.length) {
+      t.push(`Belum ada satu pun data tersimpan untuk ${labelPenuh(labelSite)}. Tiap site menyimpan data dari tab yang tercantum di pengaturan “Sumber Sheet”-nya sendiri.`);
+      for (const o of overview.filter((x) => x.site !== site).slice(0, 5)) t.push(`${labelSiteDariKey(o.site)}: ${NAMA[o.direction]} ${o.jumlah.toLocaleString('id-ID')} baris${rentang(o)}.`);
+    }
+    return t;
+  }, [overview, site, arah, tahun, bulan, labelSite]);
 
   return (
     <>
@@ -817,18 +862,32 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
         </button>
       </div>
 
+      {semuaSiteTerbuka && (
+        <SumberSemuaSite urlAwal={urlSheet} onTutup={() => setSemuaSiteTerbuka(false)} onSelesai={() => { setPesan({ tipe: 'ok', teks: 'Semua site terhubung ke spreadsheet dan sudah disinkronkan.' }); void muatData(true); }} />
+      )}
+
       {/* Panel konfigurasi sumber */}
       {panelSumberTerbuka && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '1.1rem 1.25rem', marginBottom: '1rem', display: 'grid', gap: '.75rem' }}>
+          {!siteTerkunci && (
+            <div style={{ display: 'flex', gap: '.75rem', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', padding: '.75rem .9rem', borderRadius: 12, background: 'var(--wr-in-bg)', border: '1px solid var(--wr-in-border)' }}>
+              <div style={{ fontSize: '.78rem', color: 'var(--txt-secondary)', lineHeight: 1.5, minWidth: 220, flex: 1 }}>
+                <strong style={{ color: 'var(--txt-primary)' }}>Satu spreadsheet untuk semua site?</strong> Tempel satu link, sistem membaca tab-tabnya dan menghubungkan tiap site sekaligus.
+              </div>
+              <button type="button" className="wr-btn wr-btn--primary" onClick={() => setSemuaSiteTerbuka(true)} style={{ padding: '.5rem 1rem', borderRadius: 10, cursor: 'pointer' }}>
+                <Link2 size={15} /> Hubungkan Semua Site
+              </button>
+            </div>
+          )}
           <label style={{ fontSize: '.78rem', color: 'var(--wr-txt-muted)' }}>
             URL Google Spreadsheet untuk {labelPenuh(labelSite)}
-            <input value={urlSheet} onChange={(e) => setUrlSheet(e.target.value)}
+            <input value={urlSheet} onChange={(e) => { formKotor.current = true; setUrlSheet(e.target.value); }}
               placeholder="https://docs.google.com/spreadsheets/d/..."
               className="wr-ctl" style={{ ...kontrol, display: 'block', width: '100%', marginTop: '.35rem' }} />
           </label>
           <label style={{ fontSize: '.78rem', color: 'var(--wr-txt-muted)' }}>
             Nama tab yang diimport (satu per baris)
-            <textarea value={tabsInput} onChange={(e) => setTabsInput(e.target.value)} rows={4}
+            <textarea value={tabsInput} onChange={(e) => { formKotor.current = true; setTabsInput(e.target.value); }} rows={4}
               className="wr-ctl" style={{ ...kontrol, display: 'block', width: '100%', marginTop: '.35rem', fontFamily: 'inherit', resize: 'vertical' }} />
           </label>
           <div style={{ fontSize: '.72rem', color: 'var(--wr-txt-muted)' }}>
@@ -863,6 +922,12 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
         <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)' }}>
           Belum ada data {arah === 'OUT' ? 'barang keluar' : arah === 'IN' ? 'barang masuk' : 'aset'} untuk {labelPenuh(labelSite)} pada periode ini.
           Atur sumber spreadsheet lalu klik “Sync Sekarang”, atau import file CSV.
+          {petunjukKosong.length > 0 && (
+            <div style={{ marginTop: '1rem', padding: '.8rem 1rem', borderRadius: 12, background: 'var(--wr-tab-bg)', border: '1px solid var(--wr-line)', textAlign: 'left', fontSize: '.78rem', color: 'var(--txt-secondary)', lineHeight: 1.6 }}>
+              <strong style={{ color: 'var(--txt-primary)' }}>Data yang sudah tersimpan di sistem:</strong>
+              <ul style={{ margin: '.35rem 0 0', paddingLeft: '1.1rem' }}>{petunjukKosong.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -878,18 +943,15 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
           </div>
 
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <PanelGrafik judul="Biaya per Minggu (per kategori)" tinggi={300}>
+            <PanelGrafik judul="Biaya per Minggu" tinggi={300}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={dataBatangKeluar} margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} vertical={false} />
                   <XAxis dataKey="minggu" tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={ringkas} tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} width={52} />
                   <Tooltip {...tooltipProps} formatter={fmtTooltip} cursor={{ stroke: W['--wr-cursor'] }} />
-                  <Legend wrapperStyle={{ fontSize: '.72rem' }} formatter={fmtLegend} />
-                  {sectionsAktif.map((s) => (
-                    <Line key={s.key} type="monotone" dataKey={LABEL_SEKSI[s.key]} stroke={rv(s.warna)}
-                      strokeDasharray={GARIS_SEKSI[s.key]} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
-                  ))}
+                  <Line type="monotone" dataKey="Total" name="Total Biaya" stroke={W['--wr-out']} strokeWidth={2.6}
+                    dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </PanelGrafik>
@@ -898,7 +960,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={dataPieKeluar} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2}>
-                    {dataPieKeluar.map((d) => <Cell key={d.name} fill={rv(d.warna)} stroke="transparent" />)}
+                    {dataPieKeluar.map((d) => <Cell key={d.name} fill={pie(d.warna)} stroke="transparent" />)}
                   </Pie>
                   <Tooltip {...tooltipProps} formatter={fmtTooltip} />
                   <Legend wrapperStyle={{ fontSize: '.72rem' }} formatter={fmtLegendPie(dataPieKeluar)} />
@@ -1150,7 +1212,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={aset.pieKategori} dataKey="value" nameKey="name" innerRadius={52} outerRadius={88} paddingAngle={2}>
-                    {aset.pieKategori.map((d, i) => <Cell key={d.name} fill={rv(PALET[i % PALET.length])} stroke="transparent" />)}
+                    {aset.pieKategori.map((d, i) => <Cell key={d.name} fill={pie(PALET[i % PALET.length])} stroke="transparent" />)}
                   </Pie>
                   <Tooltip {...tooltipProps} formatter={(v: unknown) => `${v} item`} />
                   <Legend wrapperStyle={{ fontSize: '.72rem' }} formatter={fmtLegendPie(aset.pieKategori)} />

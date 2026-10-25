@@ -443,8 +443,63 @@ const AMBANG_FUZZY = 0.5; // di bawah ini dianggap barang beda, tidak dipasangka
  * "mencuri" via fuzzy kandidat pembelian yang sebetulnya exact-match milik
  * aset lain yang belum diproses — itu pernah kejadian waktu diuji.
  */
+/**
+ * Nilai aset dari KODE yang sama di Barang Masuk atau Barang Keluar (semua site).
+ * Sheet aset tidak punya kolom harga, tetapi kode asetnya (mis. "01.11-2026-0033") biasanya
+ * juga tertulis di baris pembelian/pemakaian lengkap dengan harga. Kecocokan kode itu persis,
+ * jadi hasilnya dianggap harga tercatat (bukan estimasi):
+ *  - prioritas: site yang sama → Barang Masuk → tanggal terdekat → baris yang kuantitasnya belum habis dipakai
+ *  - harga satuan = total ÷ jumlah di baris sumber, dikali jumlah aset
+ * Hasil ditaruh di totalHarga/harga pada respons (data di database tidak diubah) beserta `sumberHarga`.
+ */
+export function cocokkanHargaKode(asetRows, sumber) {
+  const kodeAset = new Set(asetRows.filter((a) => !(a.totalHarga > 0)).map((a) => normKode(a.kode)).filter((k) => k.length >= 5));
+  if (!kodeAset.size) return;
+  const pool = new Map();
+  for (const r of sumber) {
+    const k = normKode(r.kode);
+    if (!kodeAset.has(k)) continue;
+    const jumlah = Number(r.jumlah) > 0 ? Number(r.jumlah) : 1;
+    const total = Number(r.total_harga) > 0 ? Number(r.total_harga) : Number(r.harga) * jumlah;
+    if (!(total > 0)) continue;
+    const e = { site: r.site, arah: r.direction, tanggal: r.tanggal ? new Date(r.tanggal).getTime() : null,
+      kode: r.kode, namaBarang: r.nama_barang, satuan: total / jumlah, sisa: jumlah };
+    if (!pool.has(k)) pool.set(k, []);
+    pool.get(k).push(e);
+  }
+  const urut = [...asetRows].sort((a, b) => String(a.tanggal || '').localeCompare(String(b.tanggal || '')));
+  for (const a of urut) {
+    if (a.totalHarga > 0) continue;
+    const kandidat = pool.get(normKode(a.kode));
+    if (!kandidat || !kandidat.length) continue;
+    const tglAset = a.tanggal ? new Date(a.tanggal).getTime() : null;
+    const skor = (k) => [k.site === a.site ? 0 : 1, k.sisa > 0 ? 0 : 1, k.arah === 'IN' ? 0 : 1,
+      tglAset != null && k.tanggal != null ? Math.abs(tglAset - k.tanggal) : Number.MAX_SAFE_INTEGER];
+    const banding = (x, y) => { const sx = skor(x), sy = skor(y); for (let i = 0; i < sx.length; i++) if (sx[i] !== sy[i]) return sx[i] - sy[i]; return 0; };
+    const terbaik = [...kandidat].sort(banding)[0];
+    const qty = Number(a.jumlah) > 0 ? Number(a.jumlah) : 1;
+    terbaik.sisa -= qty;
+    a.harga = Math.round(terbaik.satuan);
+    a.totalHarga = Math.round(terbaik.satuan * qty);
+    a.sumberHarga = { metode: 'kode', arah: terbaik.arah, site: terbaik.site,
+      tanggal: terbaik.tanggal ? new Date(terbaik.tanggal).toISOString().slice(0, 10) : null, kode: terbaik.kode, namaBarang: terbaik.namaBarang };
+  }
+}
+
+async function pasangHargaDariKode(asetRows) {
+  if (!asetRows.some((a) => !(a.totalHarga > 0) && normKode(a.kode).length >= 5)) return;
+  const { rows } = await query(
+    `SELECT site, direction, tanggal, kode, nama_barang, jumlah, harga, total_harga FROM weekly_report_rows
+      WHERE direction IN ('IN', 'OUT') AND kode <> '' AND (total_harga > 0 OR harga > 0)`);
+  cocokkanHargaKode(asetRows, rows);
+}
+
 async function attachEstimasiHarga(rowsHasil) {
-  const asetRows = rowsHasil.filter((r) => r.direction === 'ASET');
+  const asetSemua = rowsHasil.filter((r) => r.direction === 'ASET');
+  if (!asetSemua.length) return;
+  await pasangHargaDariKode(asetSemua);
+  // Yang sudah dapat harga dari kode tidak perlu diestimasi lagi.
+  const asetRows = asetSemua.filter((r) => !(r.totalHarga > 0));
   if (!asetRows.length) return;
   const sites = [...new Set(asetRows.map((r) => r.site))];
   const { rows: pembelian } = await query(
@@ -524,8 +579,11 @@ export function extractSheetId(input) {
   return m ? m[1] : (/^[a-zA-Z0-9-_]{20,}$/.test(s) ? s : null);
 }
 
-export async function fetchTabCsv(sheetId, tabName) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
+export async function fetchTabCsv(sheetId, tabName, gid = null) {
+  // Dengan gid, Google membaca tab yang PERSIS itu. Dengan nama, kalau nama tidak cocok
+  // persis Google diam-diam mengembalikan sheet PERTAMA di file — sumber data salah arah.
+  const sasaran = gid ? `gid=${encodeURIComponent(gid)}` : `sheet=${encodeURIComponent(tabName)}`;
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&${sasaran}`;
   const res = await fetch(url, { redirect: 'follow' });
   if (!res.ok) throw Object.assign(new Error(`Gagal membaca tab "${tabName}" (HTTP ${res.status}). Pastikan sheet dibagikan sebagai "Anyone with the link — Viewer".`), { status: 400 });
   const text = await res.text();
@@ -567,10 +625,26 @@ function detectDirectionFromHeaders(headerRow) {
   return null; // ambigu (mis. tab "LIST ALL ASET ...") — tidak divalidasi
 }
 
+// Nama tab yang MENYEBUT arah ("... IN", "OUT", "Barang Masuk"). Nama seperti
+// "Week RCE Jatim" / "Report MS Wunut" tidak menyebut arah → arah dibaca dari kolomnya.
+const NAMA_SEBUT_ARAH = /\b(in|out|masuk|keluar)\b/i;
+
+/**
+ * Arah sebuah tab: dari nama bila nama menyebut arah; bila tidak, dari kolom isinya
+ * (Supplier/No PO → masuk; Alokasi/PIC/No Shipment → keluar); bila tetap tidak jelas, keluar.
+ */
+export function tentukanArah(tab, rows) {
+  const dariNama = directionOf(tab);
+  if (dariNama === 'ASET' || NAMA_SEBUT_ARAH.test(tab)) return dariNama;
+  const headIdx = rows.findIndex((r) => r.some((c) => ['nama barang', 'nama aset', 'nama item'].includes(norm(c))));
+  return (headIdx >= 0 && detectDirectionFromHeaders(rows[headIdx])) || dariNama;
+}
+
 /** Lempar error kalau isi CSV ternyata bukan arah yang diharapkan dari nama tab. */
 function assertDirectionMatches(tab, rows) {
   const expected = directionOf(tab);
   if (expected === 'ASET') return; // sheet aset tidak punya pola IN/OUT
+  if (!NAMA_SEBUT_ARAH.test(tab)) return; // nama tidak menyebut arah → tidak ada yang bisa dibandingkan
   const headIdx = rows.findIndex((r) => r.some((c) => ['nama barang', 'nama aset', 'nama item'].includes(norm(c))));
   if (headIdx < 0) return; // biar rowsToRecords yang menangani (hasilnya kosong)
   const actual = detectDirectionFromHeaders(rows[headIdx]);
@@ -581,6 +655,160 @@ function assertDirectionMatches(tab, rows) {
       + `cek spasi/ejaan, lalu salin-tempel ulang nama tabnya). Sinkronisasi dibatalkan untuk mencegah data tersimpan di arah yang salah.`
     ), { status: 400 });
   }
+}
+
+// ── Satu spreadsheet untuk banyak site ────────────────────────────────────
+// Dipakai fitur "Hubungkan satu spreadsheet ke semua site": admin menempel SATU URL,
+// server membaca daftar tab-nya, mencocokkan tiap tab ke site, lalu menyimpan sumber
+// semua site sekaligus. gviz CSV tidak bisa mendaftar tab, jadi daftar tab dibaca dari
+// halaman htmlview (butuh sheet dibagikan "Anyone with the link"). Kalau gagal, admin
+// bisa menempel nama tab secara manual — pemetaan ke site tetap berjalan sama.
+
+const decodeEntitas = (t) => String(t)
+  .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+  .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+// Nama tab di halaman htmlview ditulis sebagai string JavaScript ("\x26", "\u0026", "\/" …).
+const decodeLiteralJs = (lit) => {
+  try { return JSON.parse(lit.replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => `\\u00${h}`)); }
+  catch { return lit.slice(1, -1); }
+};
+
+/** Ambil [{name, gid}] dari HTML halaman htmlview sebuah spreadsheet. */
+export function parseSheetTabs(html) {
+  const hasil = [];
+  const sudah = new Set();
+  const tambah = (name, gid) => {
+    const nama = String(name || '').trim();
+    if (!nama || sudah.has(nama)) return;
+    sudah.add(nama);
+    hasil.push({ name: nama, gid: gid ? String(gid) : null });
+  };
+  // Pola utama: items.push({name: "Tab", pageUrl: "...", gid: "123", ...})
+  const reItems = /items\.push\(\{\s*name:\s*("(?:[^"\\]|\\.)*")[^}]*?gid:\s*"(\d+)"/g;
+  for (let m; (m = reItems.exec(html));) tambah(decodeLiteralJs(m[1]), m[2]);
+  // Cadangan: menu tab HTML — <li id="sheet-button-123"><a ...>Tab</a></li>
+  if (!hasil.length) {
+    const reMenu = /<li[^>]*id="sheet-button-(\d+)"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/g;
+    for (let m; (m = reMenu.exec(html));) tambah(decodeEntitas(m[2].replace(/<[^>]+>/g, '')), m[1]);
+  }
+  return hasil;
+}
+
+export async function fetchSheetTabs(sheetId) {
+  const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`Google menolak akses daftar tab (HTTP ${res.status}). Pastikan sheet dibagikan sebagai "Anyone with the link — Viewer".`);
+  const tabs = parseSheetTabs(await res.text());
+  if (!tabs.length) throw new Error('Daftar tab tidak terbaca dari halaman Google. Tempel nama tab secara manual.');
+  return tabs;
+}
+
+// Daftar tab di-cache singkat supaya satu putaran sync (banyak tab) cukup satu kali baca.
+const cacheTab = new Map();
+async function daftarTabSheet(sheetId) {
+  const hit = cacheTab.get(sheetId);
+  if (hit && Date.now() - hit.t < 30_000) return hit.tabs;
+  let tabs = null;
+  if (process.env.SHEET_TAB_CHECK !== 'off') {
+    try { tabs = await fetchSheetTabs(sheetId); } catch { tabs = null; } // tidak terbaca → pakai cara lama
+  }
+  cacheTab.set(sheetId, { t: Date.now(), tabs });
+  return tabs;
+}
+
+const normTab = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const KATA_ABAIKAN = new Set(['ms', 'ws', 'lng', 'mother', 'station']);
+/** Kata kunci pengenal sebuah site: key-nya + kata pada labelnya (tanpa awalan MS/WS/LNG). */
+const tokenSite = (site) => {
+  const t = new Set([normTab(site.key)]);
+  for (const w of normTab(site.label).split(' ')) if (w.length >= 3 && !KATA_ABAIKAN.has(w)) t.add(w);
+  return [...t].filter(Boolean);
+};
+const TAB_RELEVAN = /report\s*weekly|weekly\s*report|barang\s*(masuk|keluar)|list\s*all\s*aset|\baset\b|\b(in|out)\b(\s*\(\d+\))?$/i;
+
+const rapikanTab = (t) => String(t || '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Cari tab sebenarnya di spreadsheet untuk nama yang tersimpan di pengaturan.
+ * Persis → pakai. Beda spasi/huruf besar-kecil saja → pakai tab aslinya (tidak perlu mengetik ulang).
+ * Tidak ada → error yang menyebut tab apa saja yang ada, BUKAN mengambil sheet pertama diam-diam.
+ * Daftar tab tidak terbaca (null) → perilaku lama (cari berdasarkan nama).
+ */
+export function pilihTab(daftar, nama) {
+  if (!daftar || !daftar.length) return { name: nama, gid: null };
+  const persis = daftar.find((t) => t.name === nama);
+  if (persis) return persis;
+  const mirip = daftar.filter((t) => rapikanTab(t.name) === rapikanTab(nama));
+  if (mirip.length === 1) return mirip[0];
+  const kata = new Set(rapikanTab(nama).split(/[^a-z0-9]+/).filter((w) => w.length > 1));
+  const saran = daftar.map((t) => ({ t, skor: rapikanTab(t.name).split(/[^a-z0-9]+/).filter((w) => kata.has(w)).length }))
+    .filter((x) => x.skor > 0).sort((a, b) => b.skor - a.skor).slice(0, 4).map((x) => `"${x.t.name}"`);
+  throw Object.assign(new Error(
+    `Tab "${nama}" tidak ada di spreadsheet.`
+    + (saran.length ? ` Mungkin maksud Anda: ${saran.join(', ')}.` : ` Tab yang ada: ${daftar.slice(0, 8).map((x) => `"${x.name}"`).join(', ')}${daftar.length > 8 ? ', …' : ''}.`)
+    + ' Salin-tempel nama tab dari Google Sheets ke pengaturan sumber.'
+  ), { status: 400 });
+}
+
+/**
+ * Tab yang namanya menyebut SITE LAIN (mis. tab "IN RCE Jatim" di pengaturan MS Wunut).
+ * Semua baris dari tab di pengaturan sebuah site disimpan ke site itu — jadi tab milik site
+ * lain di sini membuat datanya muncul di tempat yang salah dan kosong di site aslinya.
+ */
+export async function peringatanSiteLain(site, tabs) {
+  try {
+    const { rows: sites } = await query('SELECT key, label FROM sites');
+    return petakanTabKeSite((tabs || []).map((name) => ({ name })), sites, [])
+      .filter((t) => t.site && t.site !== site)
+      .map((t) => ({ tab: t.name, siteLain: t.site, labelLain: sites.find((x) => x.key === t.site)?.label ?? t.site }));
+  } catch { return []; }
+}
+
+/** Tarik satu tab dari Google lalu simpan. Dipakai sync manual maupun auto-sync. */
+export async function tarikSatuTab(sheetId, tab, site, importedBy, daftarTab) {
+  const asli = pilihTab(daftarTab, tab);
+  const parsed = parseCsv(await fetchTabCsv(sheetId, asli.name, asli.gid));
+  assertDirectionMatches(tab, parsed);
+  const arah = tentukanArah(tab, parsed);
+  const records = rowsToRecords(parsed, site);
+  const stat = await WeeklyReports.upsertMany(site, tab, records, importedBy, arah);
+  return { tab, arah, ...stat };
+}
+
+/**
+ * Cocokkan setiap tab ke satu site.
+ *  1) nama tab memuat kata pengenal site ("Report Weekly MS Wunut RDA IN" → wunut)
+ *  2) kalau tidak, dan nama tab persis sama dengan tab yang sudah terpasang pada TEPAT SATU site
+ * Hasil `site: null` = tidak bisa ditentukan → admin memilih manual di layar tinjau.
+ */
+export function petakanTabKeSite(tabs, sites, sumberSaatIni = []) {
+  const terpasang = new Map(); // nama tab (normal) -> Set(site)
+  for (const src of sumberSaatIni) for (const t of src.tabs || []) {
+    const k = normTab(t);
+    if (!terpasang.has(k)) terpasang.set(k, new Set());
+    terpasang.get(k).add(src.site);
+  }
+  return tabs.map((tab) => {
+    const n = ` ${normTab(tab.name)} `;
+    let terbaik = 0, kandidat = [], kata = '';
+    for (const site of sites) {
+      for (const tok of tokenSite(site)) {
+        if (!n.includes(` ${tok} `)) continue;
+        if (tok.length > terbaik) { terbaik = tok.length; kandidat = [site.key]; kata = tok; }
+        else if (tok.length === terbaik && !kandidat.includes(site.key)) kandidat.push(site.key);
+      }
+    }
+    let site = null, alasan = '';
+    if (kandidat.length === 1) { site = kandidat[0]; alasan = `nama tab memuat "${kata}"`; }
+    else if (kandidat.length > 1) alasan = 'nama tab cocok dengan lebih dari satu site';
+    else {
+      const ada = terpasang.get(normTab(tab.name));
+      if (ada && ada.size === 1) { site = [...ada][0]; alasan = 'sama dengan tab yang sudah terpasang di site ini'; }
+      else if (ada && ada.size > 1) alasan = 'nama tab dipakai beberapa site';
+    }
+    return { name: tab.name, gid: tab.gid ?? null, arah: directionOf(tab.name), relevan: TAB_RELEVAN.test(tab.name.trim()), site, alasan };
+  });
 }
 
 // ── Repo ──────────────────────────────────────────────────────────────────
@@ -610,8 +838,7 @@ const KOLOM_HASH = [
 const ketJumlah = (jumlah, satuan) => `${Number(jumlah) || ''} ${satuan || ''}`.trim();
 
 export const WeeklyReports = {
-  async upsertMany(site, tab, records, importedBy) {
-    const direction = directionOf(tab);
+  async upsertMany(site, tab, records, importedBy, direction = directionOf(tab)) {
     let inserted = 0, updated = 0;
     const hashesInBatch = [];
     const hashes = dedupeHashes(records);
@@ -821,7 +1048,81 @@ export function weeklyReportRouter() {
     const sheetId = extractSheetId(sheetUrl);
     if (!site || !sheetId) return res.status(400).json({ error: 'Site dan URL Google Spreadsheet wajib diisi.' });
     if (!Array.isArray(tabs) || !tabs.length) return res.status(400).json({ error: 'Minimal satu nama tab wajib diisi.' });
-    res.json(await WeeklyReports.saveSource(site, sheetId, tabs, autoSync));
+    const tersimpan = await WeeklyReports.saveSource(site, sheetId, tabs, autoSync);
+    res.json({ ...tersimpan, peringatan: await peringatanSiteLain(site, tabs) });
+  }));
+
+  // Ringkasan isi database: berapa baris per site & arah, dan rentang tahunnya. Dipakai layar
+  // "belum ada data" untuk menunjukkan DI MANA data yang sudah disinkronkan benar-benar tersimpan.
+  r.get('/weekly-reports/overview', requireAuth, wrap(async (req, res) => {
+    const mine = req.auth.assignedSite;
+    const terkunci = !(req.auth.role === 'Super Admin' || mine === 'global' || !mine);
+    const site = terkunci ? mine : (req.query.site || null);
+    const { rows } = await query(
+      `SELECT site, direction, COUNT(*)::int AS jumlah,
+              MIN(NULLIF(tahun, 0)) AS tahun_min, MAX(NULLIF(tahun, 0)) AS tahun_max,
+              COUNT(*) FILTER (WHERE tahun = 0)::int AS tanpa_tahun
+         FROM weekly_report_rows
+        ${site ? 'WHERE site = $1' : ''}
+        GROUP BY site, direction ORDER BY site, direction`,
+      site ? [site] : []);
+    res.json(rows.map((x) => ({ site: x.site, direction: x.direction, jumlah: x.jumlah, tahunMin: x.tahun_min, tahunMax: x.tahun_max, tanpaTahun: x.tanpa_tahun })));
+  }));
+
+  // ── Hubungkan SATU spreadsheet ke banyak site (khusus akun global) ───────
+  const wajibGlobal = (req) => {
+    if (req.auth.role === 'Super Admin' || req.auth.assignedSite === 'global' || !req.auth.assignedSite) return;
+    throw Object.assign(new Error('Hanya akun Super Admin / global yang boleh menghubungkan satu spreadsheet ke banyak site.'), { status: 403 });
+  };
+
+  // Langkah 1: baca daftar tab lalu usulkan pemetaan tab → site (belum menyimpan apa pun).
+  r.post('/weekly-reports/source/discover', requireAuth, wrap(async (req, res) => {
+    wajibGlobal(req);
+    const { sheetUrl, tabs: manual } = req.body || {};
+    const sheetId = extractSheetId(sheetUrl);
+    if (!sheetId) return res.status(400).json({ error: 'URL Google Spreadsheet tidak valid.' });
+
+    let daftar, sumber = 'otomatis';
+    if (Array.isArray(manual) && manual.some((t) => String(t).trim())) {
+      daftar = manual.map((t) => ({ name: String(t).trim(), gid: null })).filter((t) => t.name);
+      sumber = 'manual';
+    } else {
+      try { daftar = await fetchSheetTabs(sheetId); }
+      catch (err) { return res.status(422).json({ error: err.message, bisaManual: true }); }
+    }
+    const [{ rows: sites }, { rows: srcRows }] = await Promise.all([
+      query('SELECT key, label FROM sites ORDER BY created_at ASC'),
+      query('SELECT site, tabs FROM weekly_report_sources'),
+    ]);
+    const sumberSaatIni = srcRows.map((x) => ({ site: x.site, tabs: x.tabs ? x.tabs.split('|') : [] }));
+    res.json({ sheetId, sumber, sites, tabs: petakanTabKeSite(daftar, sites, sumberSaatIni) });
+  }));
+
+  // Langkah 2: simpan sumber untuk semua site sekaligus (sync dijalankan klien per site).
+  r.post('/weekly-reports/source/bulk', requireAuth, wrap(async (req, res) => {
+    wajibGlobal(req);
+    const { sheetUrl, assignments, autoSync } = req.body || {};
+    const sheetId = extractSheetId(sheetUrl);
+    if (!sheetId) return res.status(400).json({ error: 'URL Google Spreadsheet tidak valid.' });
+    if (!Array.isArray(assignments) || !assignments.length) return res.status(400).json({ error: 'Tidak ada site yang dipilih.' });
+
+    const { rows: sites } = await query('SELECT key FROM sites');
+    const dikenal = new Set(sites.map((x) => x.key));
+    const bersih = [];
+    for (const a of assignments) {
+      const tabs = [...new Set((a?.tabs || []).map((t) => String(t).trim()).filter(Boolean))];
+      if (!a?.site || !dikenal.has(a.site)) return res.status(400).json({ error: `Site "${a?.site}" tidak dikenal.` });
+      if (!tabs.length) continue;
+      bersih.push({ site: a.site, tabs });
+    }
+    if (!bersih.length) return res.status(400).json({ error: 'Tiap site minimal butuh satu tab.' });
+
+    const tersimpan = [];
+    for (const a of bersih) {
+      await WeeklyReports.saveSource(a.site, sheetId, a.tabs, autoSync);
+      tersimpan.push({ site: a.site, tabs: a.tabs });
+    }
+    res.json({ sheetId, tersimpan });
   }));
 
   // Tarik ulang dari Google Sheet. Dipanggil manual maupun oleh auto-sync.
@@ -832,22 +1133,15 @@ export function weeklyReportRouter() {
     if (!src) return res.status(400).json({ error: 'Sumber spreadsheet untuk site ini belum diatur.' });
 
     const hasil = [];
+    const daftarTab = await daftarTabSheet(src.sheetId);
     for (const tab of src.tabs) {
-      try {
-        const csv = await fetchTabCsv(src.sheetId, tab);
-        const parsed = parseCsv(csv);
-        assertDirectionMatches(tab, parsed);
-        const records = rowsToRecords(parsed, site);
-        const stat = await WeeklyReports.upsertMany(site, tab, records, req.auth.email);
-        hasil.push({ tab, ...stat });
-      } catch (err) {
-        hasil.push({ tab, error: err.message });
-      }
+      try { hasil.push(await tarikSatuTab(src.sheetId, tab, site, req.auth.email, daftarTab)); }
+      catch (err) { hasil.push({ tab, error: err.message }); }
     }
     const gagal = hasil.filter((h) => h.error).length;
     const dibuang = await WeeklyReports.hapusTabUsang(site, src.tabs);
     await WeeklyReports.markSync(site, gagal ? `${gagal} tab gagal` : 'OK');
-    res.json({ site, syncedAt: new Date().toISOString(), hasil, dibuang });
+    res.json({ site, syncedAt: new Date().toISOString(), hasil, dibuang, peringatan: await peringatanSiteLain(site, src.tabs) });
   }));
 
   // Import manual: frontend mengirim CSV hasil upload .xlsx/.csv.
@@ -888,13 +1182,10 @@ export function startAutoSync(intervalMs = 5 * 60 * 1000) {
       const { rows } = await query('SELECT site, sheet_id, tabs FROM weekly_report_sources WHERE auto_sync = TRUE');
       for (const s of rows) {
         const tabsAktif = (s.tabs || '').split('|').filter(Boolean);
+        const daftarTab = await daftarTabSheet(s.sheet_id);
         for (const tab of tabsAktif) {
-          try {
-            const parsed = parseCsv(await fetchTabCsv(s.sheet_id, tab));
-            assertDirectionMatches(tab, parsed);
-            const records = rowsToRecords(parsed, s.site);
-            await WeeklyReports.upsertMany(s.site, tab, records, 'auto-sync');
-          } catch (err) { console.warn(`[weekly-sync] ${s.site}/${tab}:`, err.message); }
+          try { await tarikSatuTab(s.sheet_id, tab, s.site, 'auto-sync', daftarTab); }
+          catch (err) { console.warn(`[weekly-sync] ${s.site}/${tab}:`, err.message); }
         }
         await WeeklyReports.hapusTabUsang(s.site, tabsAktif);
         await WeeklyReports.markSync(s.site, 'OK (auto)');

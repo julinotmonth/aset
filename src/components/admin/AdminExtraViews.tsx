@@ -70,14 +70,14 @@ export function formatIDR(val: number): string {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(val);
 }
 
-export function PageHeader({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub: string }) {
+export function PageHeader({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub?: string }) {
   return (
     <div className="view-page-header">
       <div className="view-page-title">
         <Icon size={22} color="#00D084" />
         {title}
       </div>
-      <div className="view-page-sub">{sub}</div>
+      {sub && <div className="view-page-sub">{sub}</div>}
     </div>
   );
 }
@@ -546,7 +546,9 @@ export const AssignmentsView: React.FC<{
   spareParts: SparePart[];
   logs: ActivityLog[];
   onConfirmTransfer: (item: SparePart, quantity: number, targetSite: SiteLocation) => void;
-}> = ({ spareParts, logs, onConfirmTransfer }) => {
+  /** Sembunyikan judul halaman (dipakai saat disematkan sebagai tab di menu Transfer Antar Site). */
+  tanpaHeader?: boolean;
+}> = ({ spareParts, logs, onConfirmTransfer, tanpaHeader }) => {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [transferItem, setTransferItem] = useState<SparePart | null>(null);
   const [search, setSearch] = useState('');
@@ -651,7 +653,7 @@ export const AssignmentsView: React.FC<{
   return (
     <div>
       <div className="view-toolbar-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <PageHeader icon={ArrowLeftRight} title="Transfer Antar Site" sub="Riwayat perpindahan spare part antar lokasi operasional" />
+        {tanpaHeader ? <div /> : <PageHeader icon={ArrowLeftRight} title="Transfer Antar Site" sub="Riwayat perpindahan spare part antar lokasi operasional" />}
         <button type="button" className="btn-primary view-toolbar-btn" onClick={() => setIsPickerOpen(true)} style={{ marginBottom: '1.5rem' }}>
           <Plus size={18} />
           Transfer Baru

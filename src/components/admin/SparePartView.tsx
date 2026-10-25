@@ -96,10 +96,12 @@ interface Props {
   onDelete: (id: string) => void;
   /** Ubah stok cepat; harus mengembalikan Promise agar tombol bisa dikunci selama diproses. */
   onAdjustStock: (item: SparePart, delta: number) => Promise<void>;
+  /** Sembunyikan judul halaman (dipakai saat disematkan sebagai tab di menu Spare Part). */
+  tanpaHeader?: boolean;
 }
 
 export const SparePartView: React.FC<Props> = ({
-  spareParts, categoryOptions, site, onSiteChange, onAdd, onEdit, onTransfer, onDelete, onAdjustStock,
+  spareParts, categoryOptions, site, onSiteChange, onAdd, onEdit, onTransfer, onDelete, onAdjustStock, tanpaHeader,
 }) => {
   useSitesRefresh();
 
@@ -224,7 +226,7 @@ export const SparePartView: React.FC<Props> = ({
   return (
     <>
       <style>{WR_CSS}{CSS}</style>
-      <PageHeader icon={Package} title="Spare Part" sub="Kelola stok, harga, dan lokasi spare part di seluruh site operasional." />
+      {!tanpaHeader && <PageHeader icon={Package} title="Spare Part" sub="Kelola stok, harga, dan lokasi spare part di seluruh site operasional." />}
 
       {/* KPI — kartu "perlu restok" & "maintenance" bisa diklik untuk memfilter tabel */}
       <div className="sp-kpis">

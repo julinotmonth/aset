@@ -179,6 +179,10 @@
   --wr-c6: #EA91BC;
   --wr-c7: #EF996C;
   --wr-c8: #A0BE66;
+  /* Warna isi pie/donat: gelap = sama dengan warna seri. */
+  --wr-pie-in: var(--wr-in); --wr-pie-out: var(--wr-out); --wr-pie-aset: var(--wr-aset); --wr-pie-warn: var(--wr-warn);
+  --wr-pie-info: var(--wr-info); --wr-pie-c6: var(--wr-c6); --wr-pie-c7: var(--wr-c7); --wr-pie-c8: var(--wr-c8);
+  --wr-pie-neutral: var(--wr-neutral);
   --wr-neutral: #8A9AB2;
   --wr-neutral-text: #8A9AB2;
   --wr-neutral-bg: rgba(138, 154, 178, 0.12);  --wr-neutral-border: rgba(138, 154, 178, 0.30);
@@ -276,6 +280,11 @@ html[data-theme='light'] {
   --wr-c6: #C65B93;
   --wr-c7: #CC6526;
   --wr-c8: #6F920D;
+  /* Warna isi pie/donat mode terang: lebih lembut & cerah daripada warna teks/garis
+     (yang sengaja gelap demi kontras), tetap dapat dibedakan satu sama lain. */
+  --wr-pie-in: #2FB380; --wr-pie-out: #4F8FEF; --wr-pie-aset: #8B7CF0; --wr-pie-warn: #F0A63A;
+  --wr-pie-info: #34B8CC; --wr-pie-c6: #E879A9; --wr-pie-c7: #F08A5D; --wr-pie-c8: #9CC24A;
+  --wr-pie-neutral: #9AA7B5;
   --wr-neutral: #5E6F7E;
   --wr-neutral-text: #536472;
   --wr-neutral-bg: rgba(94, 111, 126, 0.10);   --wr-neutral-border: rgba(94, 111, 126, 0.30);
