@@ -855,9 +855,10 @@ input[type="range"]::-moz-range-thumb {
    ═══════════════════════════════════════════════════════════ */
 .admin-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg-root);
   color: var(--txt-primary);
-  padding-bottom: 4rem;
+  /* padding-bottom dipindah ke .admin-content supaya sidebar sticky sampai dasar halaman */
 }
 
 .admin-header {
@@ -1343,6 +1344,7 @@ input[type="range"]::-moz-range-thumb {
 .admin-layout {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .admin-sidebar {
@@ -1350,11 +1352,14 @@ input[type="range"]::-moz-range-thumb {
   flex-shrink: 0;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
-  padding: 1.25rem 0.9rem;
+  padding: 1.25rem 0.9rem calc(2rem + env(safe-area-inset-bottom, 0px));
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   z-index: 60;
 }
 
@@ -1447,6 +1452,7 @@ html[data-theme='light'] .brand-logo-light {
 .admin-content {
   flex: 1;
   min-width: 0;
+  padding-bottom: 4rem;
 }
 
 .admin-mobile-nav-toggle {
@@ -1465,6 +1471,9 @@ html[data-theme='light'] .brand-logo-light {
     position: fixed;
     left: 0;
     top: 0;
+    bottom: 0;
+    height: auto;
+    width: min(270px, 86vw);
     transform: translateX(-100%);
     transition: transform var(--transition-normal), box-shadow var(--transition-normal);
     box-shadow: none;

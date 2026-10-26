@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, ImagePlus, User as UserIcon, Mail, Briefcase, ShieldCheck, MapPin } from 'lucide-react';
 import type { AppUser, SiteFilter, UserRole } from '../../types';
+import { getSites, useSitesRefresh } from '../../data/siteStore';
+import { labelPenuh } from './siteLabel';
+import './formModal.css';
 
 interface UserFormModalProps {
   isOpen: boolean;
@@ -13,32 +16,15 @@ interface UserFormModalProps {
   onSave: (data: Partial<AppUser> & { id?: string }) => void;
 }
 
-const SITE_OPTIONS: { value: SiteFilter; label: string }[] = [
-  { value: 'global', label: 'Semua Site (Global)' },
-  { value: 'indramayu', label: 'Site Cibungur' },
-  { value: 'blora', label: 'Site Blora' },
-  { value: 'setu', label: 'Site Setu' },
-];
-
 const ROLE_OPTIONS: { value: UserRole; label: string; desc: string }[] = [
   { value: 'Super Admin', label: 'Super Admin', desc: 'Akses penuh, termasuk kelola pengguna' },
   { value: 'Site Manager', label: 'Site Manager', desc: 'Kelola inventaris di site yang ditugaskan' },
   { value: 'Maintenance Engineer', label: 'Maintenance Engineer', desc: 'Fokus servis & maintenance' },
 ];
 
-const labelStyle: React.CSSProperties = { display: 'block', fontSize: '0.8rem', color: 'var(--txt-muted)', marginBottom: '0.4rem', fontWeight: 600 };
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: 'var(--bg-root)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: '8px',
-  padding: '0.65rem 0.85rem',
-  color: 'var(--txt-primary)',
-  outline: 'none',
-  fontSize: '0.88rem',
-};
-
 export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, userToEdit, onClose, onSave }) => {
+  useSitesRefresh(); // daftar site selalu ikut data terbaru (tambah/edit/hapus site)
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -62,7 +48,30 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
     }
   }, [isOpen, userToEdit]);
 
+  // Esc untuk menutup + kunci scroll halaman di belakang modal.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
+
+  const sites = getSites();
+  const siteOptions: { value: SiteFilter; label: string }[] = [
+    { value: 'global', label: 'Semua Site (Global)' },
+    ...sites.map((s) => ({ value: s.key, label: labelPenuh(s.label) })),
+  ];
+  // Site yang tertaut ke akun ini tapi sudah dihapus — tetap tampil agar tidak diam-diam berubah.
+  if (assignedSite !== 'global' && !sites.some((s) => s.key === assignedSite)) {
+    siteOptions.push({ value: assignedSite, label: `${assignedSite} (site tidak ditemukan)` });
+  }
 
   const handleImageSelect = (file: File | undefined) => {
     setImageError('');
@@ -71,8 +80,7 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
       setImageError('File harus berupa gambar (JPG, PNG, WebP).');
       return;
     }
-    const MAX_SIZE = 3 * 1024 * 1024;
-    if (file.size > MAX_SIZE) {
+    if (file.size > 3 * 1024 * 1024) {
       setImageError('Ukuran foto maksimal 3MB.');
       return;
     }
@@ -92,7 +100,6 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
       setFormError('Email wajib diisi.');
       return;
     }
-
     onSave({
       id: userToEdit?.id,
       name: name.trim(),
@@ -104,146 +111,119 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
     });
   };
 
-  const initials = name
-    .trim()
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase() || '?';
+  const initials = name.trim().split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+  const judul = mode === 'self' ? 'Profil Saya' : userToEdit ? 'Edit Pengguna' : 'Tambah Pengguna';
+  const submitLabel = mode === 'self' ? 'Simpan Profil' : userToEdit ? 'Simpan Perubahan' : 'Tambah Pengguna';
 
   return createPortal(
-    <div className="admin-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="glass-panel admin-modal-panel" style={{ maxWidth: '480px' }}>
-        <button onClick={onClose} className="admin-modal-close-btn">
-          <X size={18} />
-        </button>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', paddingRight: '2.5rem' }}>
-          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(0,208,132,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <UserIcon size={22} color="#00D084" />
-          </div>
-          <div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--txt-primary)' }}>
-              {mode === 'self' ? 'Profil Saya' : userToEdit ? 'Edit Pengguna' : 'Tambah Pengguna'}
-            </h3>
-            <div style={{ fontSize: '0.8rem', color: 'var(--txt-muted)' }}>
+    <div className="fm-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="glass-panel fm-panel" role="dialog" aria-modal="true" aria-label={judul}>
+        <div className="fm-head">
+          <div className="fm-head-ico"><UserIcon size={22} color="#00D084" /></div>
+          <div style={{ minWidth: 0 }}>
+            <h3 className="fm-title">{judul}</h3>
+            <div className="fm-sub">
               {mode === 'self' ? 'Perbarui nama, foto, dan jabatan Anda' : 'Kelola akun tim yang bisa mengakses portal ini'}
             </div>
           </div>
+          <button type="button" className="fm-close" onClick={onClose} aria-label="Tutup"><X size={18} /></button>
         </div>
 
-        {formError && (
-          <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#F87171', padding: '0.65rem 0.85rem', borderRadius: '8px', fontSize: '0.82rem', marginBottom: '1.1rem' }}>
-            {formError}
-          </div>
-        )}
+        <form className="fm-form" onSubmit={handleSubmit}>
+          <div className="fm-body">
+            {formError && <div className="fm-error" role="alert">{formError}</div>}
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-          <div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleImageSelect(e.target.files?.[0])}
-              style={{ display: 'none' }}
-            />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <div style={{
-                width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
-                background: 'rgba(0,208,132,0.15)', border: '2px solid var(--bg-surface)', boxShadow: '0 0 0 1px var(--border-subtle)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="Foto profil" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <span style={{ fontSize: '1.4rem', fontWeight: 800, color: '#00D084' }}>{initials}</span>
-                )}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="btn-chip"
-                  style={{ fontSize: '0.78rem' }}
-                >
-                  <ImagePlus size={14} />
-                  {avatarUrl ? 'Ganti Foto' : 'Unggah Foto'}
-                </button>
-                {imageError && <div style={{ fontSize: '0.72rem', color: '#F87171' }}>{imageError}</div>}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Nama Lengkap</label>
-            <div style={{ position: 'relative' }}>
-              <UserIcon size={15} color="var(--txt-muted)" style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }} />
-              <input value={name} onChange={(e) => setName(e.target.value)} style={{ ...inputStyle, paddingLeft: '2.4rem' }} placeholder="mis. Hendra Gunawan" />
-            </div>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Jabatan</label>
-            <div style={{ position: 'relative' }}>
-              <Briefcase size={15} color="var(--txt-muted)" style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }} />
-              <input value={position} onChange={(e) => setPosition(e.target.value)} style={{ ...inputStyle, paddingLeft: '2.4rem' }} placeholder="mis. Site Manager Bekasi" />
-            </div>
-          </div>
-
-          {mode === 'admin' && (
-            <>
-              <div>
-                <label style={labelStyle}>Email</label>
-                <div style={{ position: 'relative' }}>
-                  <Mail size={15} color="var(--txt-muted)" style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }} />
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ ...inputStyle, paddingLeft: '2.4rem' }} placeholder="nama@reethau.com" disabled={!!userToEdit} />
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleImageSelect(e.target.files?.[0])}
+                style={{ display: 'none' }}
+              />
+              <div className="fm-avatar-row">
+                <div className="fm-avatar">
+                  {avatarUrl ? <img src={avatarUrl} alt="Foto profil" /> : <span>{initials}</span>}
                 </div>
-                {userToEdit && <p style={{ fontSize: '0.7rem', color: 'var(--txt-muted)', marginTop: '0.3rem' }}>Email tidak bisa diubah setelah akun dibuat.</p>}
-              </div>
-
-              <div>
-                <label style={labelStyle}>Level Akses (Role)</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {ROLE_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setRole(opt.value)}
-                      style={{
-                        display: 'flex', alignItems: 'flex-start', gap: '0.6rem', textAlign: 'left',
-                        padding: '0.6rem 0.75rem', borderRadius: '10px', cursor: 'pointer',
-                        background: role === opt.value ? 'rgba(0,208,132,0.1)' : 'var(--bg-root)',
-                        border: `1px solid ${role === opt.value ? 'rgba(0,208,132,0.45)' : 'var(--border-subtle)'}`,
-                      }}
-                    >
-                      <ShieldCheck size={16} color={role === opt.value ? '#00D084' : 'var(--txt-muted)'} style={{ marginTop: '1px', flexShrink: 0 }} />
-                      <div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: role === opt.value ? '#00D084' : 'var(--txt-primary)' }}>{opt.label}</div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--txt-muted)' }}>{opt.desc}</div>
-                      </div>
-                    </button>
-                  ))}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  <button type="button" onClick={() => fileInputRef.current?.click()} className="btn-chip" style={{ fontSize: '0.78rem' }}>
+                    <ImagePlus size={14} />
+                    {avatarUrl ? 'Ganti Foto' : 'Unggah Foto'}
+                  </button>
+                  {imageError && <div className="fm-field-error">{imageError}</div>}
                 </div>
               </div>
+            </div>
 
+            <div className="fm-grid2">
               <div>
-                <label style={labelStyle}>Site yang Ditugaskan</label>
-                <div style={{ position: 'relative' }}>
-                  <MapPin size={15} color="var(--txt-muted)" style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }} />
-                  <select value={assignedSite} onChange={(e) => setAssignedSite(e.target.value as SiteFilter)} style={{ ...inputStyle, paddingLeft: '2.4rem', cursor: 'pointer' }}>
-                    {SITE_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                  </select>
+                <label className="fm-label" htmlFor="fm-nama">Nama Lengkap</label>
+                <div className="fm-inputwrap">
+                  <UserIcon size={15} />
+                  <input id="fm-nama" className="fm-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="mis. Hendra Gunawan" autoComplete="name" />
                 </div>
               </div>
-            </>
-          )}
+              <div>
+                <label className="fm-label" htmlFor="fm-jabatan">Jabatan</label>
+                <div className="fm-inputwrap">
+                  <Briefcase size={15} />
+                  <input id="fm-jabatan" className="fm-input" value={position} onChange={(e) => setPosition(e.target.value)} placeholder="mis. Site Manager Bekasi" />
+                </div>
+              </div>
+            </div>
 
-          <button type="submit" className="btn-primary" style={{ justifyContent: 'center', marginTop: '0.25rem' }}>
-            <Save size={16} />
-            {mode === 'self' ? 'Simpan Profil' : userToEdit ? 'Simpan Perubahan' : 'Tambah Pengguna'}
-          </button>
+            {mode === 'admin' && (
+              <>
+                <div>
+                  <label className="fm-label" htmlFor="fm-email">Email</label>
+                  <div className="fm-inputwrap">
+                    <Mail size={15} />
+                    <input id="fm-email" className="fm-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nama@reethau.com" disabled={!!userToEdit} autoComplete="email" />
+                  </div>
+                  {userToEdit && <p className="fm-hint">Email tidak bisa diubah setelah akun dibuat.</p>}
+                </div>
+
+                <div>
+                  <span className="fm-label">Level Akses (Role)</span>
+                  <div className="fm-roles" role="group" aria-label="Level akses">
+                    {ROLE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`fm-role${role === opt.value ? ' is-on' : ''}`}
+                        aria-pressed={role === opt.value}
+                        onClick={() => setRole(opt.value)}
+                      >
+                        <ShieldCheck size={16} style={{ flexShrink: 0 }} />
+                        <span>
+                          <span className="fm-role-name" style={{ display: 'block' }}>{opt.label}</span>
+                          <span className="fm-role-desc" style={{ display: 'block' }}>{opt.desc}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="fm-label" htmlFor="fm-site">Site yang Ditugaskan</label>
+                  <div className="fm-inputwrap">
+                    <MapPin size={15} />
+                    <select id="fm-site" className="fm-input" value={assignedSite} onChange={(e) => setAssignedSite(e.target.value)}>
+                      {siteOptions.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
+                  </div>
+                  <p className="fm-hint">{sites.length} site tersedia — daftar ini otomatis mengikuti menu Site Operasional.</p>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="fm-foot">
+            <button type="submit" className="btn-primary">
+              <Save size={16} />
+              {submitLabel}
+            </button>
+          </div>
         </form>
       </div>
     </div>,

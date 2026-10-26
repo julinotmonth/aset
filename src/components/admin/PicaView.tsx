@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import type { SiteMeta } from '../../data/siteStore';
+import { labelPenuh } from './siteLabel';
 import { NADA, WR_CSS } from './wrTema';
 import type { Nada } from './wrTema';
 
@@ -126,9 +127,6 @@ function KartuRingkas({ label, nilai, nada, aktif, onClick }: {
   );
 }
 
-// Sama dengan labelPenuh() di WeeklyReportView.tsx (disalin di sini agar tidak
-// terjadi import melingkar): site tanpa prefix MS/WS/LNG diberi awalan "MS ".
-const labelPenuh = (label: string) => (/^\s*(ms|ws|lng)\b/i.test(label) ? label : `MS ${label}`);
 
 export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }: Props) {
   const [items, setItems] = useState<PicaItem[]>([]);

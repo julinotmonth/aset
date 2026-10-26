@@ -29,7 +29,7 @@ import {
 } from 'recharts';
 import type { AuthState } from '../../types';
 import type { LaporanMode } from './Sidebar';
-import { labelSiteDariKey } from './siteLabel';
+import { labelSiteDariKey, labelPenuh } from './siteLabel';
 import { SumberSemuaSite } from './SumberSemuaSite';
 import { api } from '../../lib/api';
 import { getSites } from '../../data/siteStore';
@@ -149,7 +149,6 @@ const rupiahPenuh = (n: number) => `Rp ${Math.round(n).toLocaleString('id-ID')}`
 // Tapi tidak semua site adalah Mother Station — mis. WS Cibungur — yang
 // labelnya sudah menyertakan prefix sendiri. Jangan dobel jadi "MS WS
 // Cibungur": kalau label sudah diawali "MS"/"WS", pakai apa adanya.
-const labelPenuh = (label: string) => (/^\s*(ms|ws|lng)\b/i.test(label) ? label : `MS ${label}`);
 
 // Sebagian site (WS Cibungur/"indramayu") itu bengkel armada kendaraan, bukan
 // fasilitas dengan mesin tetap — kolom Alokasi-nya diisi PLAT KENDARAAN yang
