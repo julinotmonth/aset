@@ -41,9 +41,7 @@ import {
   AssignmentsView,
   MaintenanceView,
   AuditView,
-  BranchesView,
   ProductLinesView,
-  TeamView,
   GalleryView,
   UserManagementView,
   ACTION_META,
@@ -54,6 +52,8 @@ import {
 import { ReportsView } from './AssetManagementViews';
 import { AsetTetapView } from './AsetTetapView';
 import { JadwalMaintenance, type TujuanNav } from './JadwalMaintenance';
+import { SiteOperasionalView } from './SiteOperasionalView';
+import { TimLapangan } from './TimLapangan';
 
 interface AdminDashboardProps {
   auth: AuthState;
@@ -79,6 +79,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   const bukaDariJadwal = (t: TujuanNav) => {
     if (t.ke === 'spare-part') { setCariSparePart(t.cari ?? ''); setActiveView('assets'); }
     else if (t.ke === 'laporan') { setLaporanMode(t.mode); setActiveView('weekly-report'); }
+    else if (t.ke === 'jadwal') setActiveView('work-orders');
     else { setAsetTab(t.tab); setActiveView('asset-registry'); }
   };
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
@@ -625,10 +626,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           : <WeeklyReportView auth={auth} mode={laporanMode} />)}
         {activeView === 'audit' && <AuditView logs={logs} />}
         {activeView === 'branches' && (
-          <BranchesView spareParts={spareParts} onSitesChanged={() => setSitesVersion((v) => v + 1)} />
+          <SiteOperasionalView auth={auth} spareParts={spareParts} onSitesChanged={() => setSitesVersion((v) => v + 1)} onNavigasi={bukaDariJadwal} />
         )}
         {activeView === 'product-lines' && <ProductLinesView spareParts={spareParts} />}
-        {activeView === 'team' && <TeamView logs={logs} />}
+        {activeView === 'team' && <TimLapangan auth={auth} onNavigasi={bukaDariJadwal} />}
         {activeView === 'gallery' && <GalleryView auth={auth} />}
         {activeView === 'users' && isSuperAdmin && (
           <UserManagementView

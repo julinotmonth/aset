@@ -60,6 +60,7 @@ import {
   useGalleryRefresh,
 } from '../../data/galleryStore';
 import { QRCodeModal } from './QRCodeModal';
+import { labelSiteDariKey } from './siteLabel';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { UserFormModal } from './UserFormModal';
 import { TransferModal } from './TransferModal';
@@ -1444,7 +1445,7 @@ export const AuditView: React.FC<{ logs: ActivityLog[] }> = ({ logs }) => {
 /* ────────────────────────────── Branches (Sites) ────────────────────────────── */
 /** Search + pick an existing spare part's site is handled elsewhere; this
  * modal is for creating/editing an operational Site itself. */
-const SiteFormModal: React.FC<{
+export const SiteFormModal: React.FC<{
   isOpen: boolean;
   siteToEdit: SiteMeta | null;
   onClose: () => void;
@@ -2236,6 +2237,23 @@ export const UserManagementView: React.FC<{
 
   const superAdminCount = users.filter((u) => u.role === 'Super Admin').length;
 
+  // Pencarian & penyaringan daftar akun
+  const [cari, setCari] = useState('');
+  const [filterRole, setFilterRole] = useState<'ALL' | UserRole>('ALL');
+  const [filterSite, setFilterSite] = useState('ALL');
+  const kunciSiteAda = useMemo(() => new Set(getSites().map((s) => s.key)), []);
+  const siteDipakai = useMemo(() => [...new Set(users.map((u) => u.assignedSite))].sort(), [users]);
+  const urutRole: Record<UserRole, number> = { 'Super Admin': 0, 'Site Manager': 1, 'Maintenance Engineer': 2 };
+  const daftarUser = useMemo(() => {
+    const q = cari.trim().toLowerCase();
+    return users
+      .filter((u) => (filterRole === 'ALL' || u.role === filterRole) && (filterSite === 'ALL' || u.assignedSite === filterSite)
+        && (!q || [u.name, u.email, u.position].some((t) => (t || '').toLowerCase().includes(q))))
+      .sort((a, b) => urutRole[a.role] - urutRole[b.role] || a.name.localeCompare(b.name, 'id'));
+  }, [users, cari, filterRole, filterSite]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hitungRole = (r: UserRole) => users.filter((u) => u.role === r).length;
+  const labelAkses = (site: string) => (site === 'global' ? 'Semua Site' : labelSiteDariKey(site));
+
   const openAdd = () => {
     setEditingUser(null);
     setIsFormOpen(true);
@@ -2289,10 +2307,53 @@ export const UserManagementView: React.FC<{
           </div>
           <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--txt-primary)' }}>{superAdminCount}</div>
         </div>
+        <div className="glass-panel" style={{ borderRadius: '16px', padding: '1.1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.65rem' }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '9px', background: 'rgba(96,165,250,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <MapPin size={16} color="#60A5FA" />
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--txt-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em' }}>Site Manager</div>
+          </div>
+          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--txt-primary)' }}>{hitungRole('Site Manager')}</div>
+        </div>
+        <div className="glass-panel" style={{ borderRadius: '16px', padding: '1.1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.65rem' }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '9px', background: 'rgba(167,139,250,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Wrench size={16} color="#A78BFA" />
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--txt-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em' }}>Maintenance Engineer</div>
+          </div>
+          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--txt-primary)' }}>{hitungRole('Maintenance Engineer')}</div>
+        </div>
+      </div>
+
+      <div className="glass-panel" style={{ borderRadius: '16px', padding: '1rem 1.15rem', marginBottom: '1.25rem', fontSize: '0.78rem', color: 'var(--txt-secondary)', lineHeight: 1.65 }}>
+        <div style={{ fontWeight: 800, color: 'var(--txt-primary)', marginBottom: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}><ShieldCheck size={14} /> Hak akses</div>
+        <b style={{ color: 'var(--txt-primary)' }}>Super Admin</b> — melihat seluruh site dan satu-satunya yang bisa mengelola pengguna, site, dan sumber spreadsheet semua site. {' '}
+        <b style={{ color: 'var(--txt-primary)' }}>Site Manager</b> dan <b style={{ color: 'var(--txt-primary)' }}>Maintenance Engineer</b> — hanya melihat data pada <b style={{ color: 'var(--txt-primary)' }}>site yang ditetapkan</b>; keduanya memiliki hak yang sama, perbedaannya hanya jabatan.
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.1rem' }}>
+        <div style={{ position: 'relative', flex: '1 1 220px', maxWidth: 340 }}>
+          <Search size={15} aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--txt-muted)' }} />
+          <input className="wr-ctl" style={{ width: '100%', padding: '0.5rem 0.7rem 0.5rem 2rem', borderRadius: 10, font: 'inherit', fontSize: '0.84rem' }} placeholder="Cari nama, email, atau jabatan…" value={cari} onChange={(e) => setCari(e.target.value)} aria-label="Cari pengguna" />
+        </div>
+        <select className="wr-ctl" style={{ padding: '0.5rem 0.7rem', borderRadius: 10, font: 'inherit', fontSize: '0.84rem' }} value={filterRole} onChange={(e) => setFilterRole(e.target.value as 'ALL' | UserRole)} aria-label="Filter peran">
+          <option value="ALL">Semua Peran</option><option value="Super Admin">Super Admin</option><option value="Site Manager">Site Manager</option><option value="Maintenance Engineer">Maintenance Engineer</option>
+        </select>
+        <select className="wr-ctl" style={{ padding: '0.5rem 0.7rem', borderRadius: 10, font: 'inherit', fontSize: '0.84rem' }} value={filterSite} onChange={(e) => setFilterSite(e.target.value)} aria-label="Filter site">
+          <option value="ALL">Semua Akses Site</option>
+          {siteDipakai.map((st) => <option key={st} value={st}>{labelAkses(st)}</option>)}
+        </select>
+        {(cari || filterRole !== 'ALL' || filterSite !== 'ALL') && (
+          <button type="button" className="btn-chip" onClick={() => { setCari(''); setFilterRole('ALL'); setFilterSite('ALL'); }} style={{ fontSize: '0.76rem' }}><X size={12} /> Reset</button>
+        )}
+        <span style={{ marginLeft: 'auto', fontSize: '0.76rem', color: 'var(--txt-muted)' }}>{daftarUser.length} dari {users.length} akun</span>
       </div>
 
       <div className="roster-grid">
-        {users.map((user) => {
+        {daftarUser.length === 0 && <div style={{ color: 'var(--txt-muted)' }}>Tidak ada akun yang cocok dengan filter.</div>}
+        {daftarUser.map((user) => {
           const badge = ROLE_BADGE[user.role];
           const isYou = user.id === currentUserId;
           const color = avatarColorFor(user.name);
@@ -2331,7 +2392,12 @@ export const UserManagementView: React.FC<{
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.2rem', fontSize: '0.72rem', color: 'var(--txt-muted)' }}>
                   <MapPin size={11} />
-                  {user.assignedSite === 'global' ? 'Semua Site' : `Site ${user.assignedSite.charAt(0).toUpperCase()}${user.assignedSite.slice(1)}`}
+                  {labelAkses(user.assignedSite)}
+                  {user.assignedSite !== 'global' && !kunciSiteAda.has(user.assignedSite) && (
+                    <span title="Site ini sudah tidak ada di daftar Site Operasional — ubah akses akun ini" style={{ marginLeft: '0.35rem', display: 'inline-flex', alignItems: 'center', gap: '0.2rem', color: '#F87171', fontWeight: 700 }}>
+                      <AlertTriangle size={11} /> site tidak ditemukan
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
                   <button type="button" className="btn-chip" onClick={() => openEdit(user)} style={{ fontSize: '0.74rem', padding: '0.4rem 0.7rem' }}>

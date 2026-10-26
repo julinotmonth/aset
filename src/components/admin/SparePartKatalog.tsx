@@ -191,7 +191,7 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
             <KpiKartu ikon={TrendingDown} warna="#F59E0B" label="Nilai Keluar" nilai={rupiahRingkas(k.nilaiKeluar)} sub="total pemakaian" />
             <KpiKartu ikon={Wallet} warna="#34D399" label="Nilai Sisa Stok" nilai={rupiahRingkas(k.nilaiSaldo)} sub="sisa stok × harga rata-rata" />
             <KpiKartu ikon={AlertTriangle} warna="#F87171" label="Perlu Perhatian" nilai={angka(hitungStatus.Kritis + hitungStatus['Cek Stok'])}
-              sub={`${angka(hitungStatus.Kritis)} kritis · ${angka(hitungStatus['Cek Stok'])} cek stok`} onKlik={() => setStatus('Kritis')} />
+              sub={`${angka(hitungStatus.Kritis)} kritis · ${angka(hitungStatus['Cek Stok'])} cek stok`} onKlik={() => { setStatus('Kritis'); window.setTimeout(() => document.getElementById('sp-katalog')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }), 50); }} />
           </div>
 
           {/* ── Tren & peringkat ── */}
@@ -242,7 +242,7 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
           </div>
 
           {/* ── Katalog ── */}
-          <section className="glass-panel sp2-panel" aria-label="Katalog spare part">
+          <section id="sp-katalog" className="glass-panel sp2-panel" aria-label="Katalog spare part" style={{ scrollMarginTop: 90 }}>
             <div className="sp2-ph">
               <div>
                 <h3 className="sp2-h3">Katalog Spare Part</h3>

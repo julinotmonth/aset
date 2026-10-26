@@ -32,7 +32,8 @@ import type { LaporanMode, AsetTab } from './Sidebar';
 export type TujuanNav =
   | { ke: 'spare-part'; cari?: string }
   | { ke: 'laporan'; mode: LaporanMode }
-  | { ke: 'aset'; tab: AsetTab };
+  | { ke: 'aset'; tab: AsetTab }
+  | { ke: 'jadwal' };
 
 const STATUS: StatusJadwal[] = ['Terlambat', 'Segera', 'Terjadwal', 'Cek Data'];
 const NADA_JADWAL: Record<StatusJadwal, Nada> = { Terlambat: NADA.neg, Segera: NADA.warn, Terjadwal: NADA.in, 'Cek Data': NADA.neutral };
@@ -85,7 +86,20 @@ export function JadwalMaintenance({ auth, onNavigasi }: { auth: AuthState; onNav
   const std = useMemo(() => ({
     OH: Math.max(1, Math.round(standar.OH) || STANDAR_DEFAULT.OH), OLI: Math.max(1, Math.round(standar.OLI) || STANDAR_DEFAULT.OLI), MAINT: Math.max(1, Math.round(standar.MAINT) || STANDAR_DEFAULT.MAINT),
   }), [standar]);
-  const semua = useMemo(() => bangunJadwal(keluarF, { standar: std }), [keluarF, std]);
+  // Jadwal dihitung dari SEMUA kegiatan peralatan (supaya jam jalan/RH akurat), lalu seluruh halaman
+  // — angka kunci, agenda, grafik, peringkat, dan tabel — mengikuti filter Kegiatan & pencarian.
+  const semuaAll = useMemo(() => bangunJadwal(keluarF, { standar: std }), [keluarF, std]);
+  const semua = useMemo(() => {
+    const q = cari.trim().toLowerCase();
+    return semuaAll.filter((j) => (kegiatan === 'ALL' || j.kegiatan === kegiatan) && (!q || j.peralatan.toLowerCase().includes(q)));
+  }, [semuaAll, kegiatan, cari]);
+  const keluarTampil = useMemo(() => {
+    const q = cari.trim().toLowerCase();
+    return keluarF.filter((r) => (kegiatan === 'ALL' || r.section === kegiatan) && (!q || (r.alokasi || '').toLowerCase().includes(q)));
+  }, [keluarF, kegiatan, cari]);
+  const ketFilter = kegiatan === 'ALL' ? '' : ` · ${NAMA_KEGIATAN[kegiatan]}`;
+  const keTabel = () => { document.getElementById('jm-tabel')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); };
+  const pilihStatus = (s: 'ALL' | StatusJadwal) => { setStatus(s); if (s !== 'ALL') window.setTimeout(keTabel, 50); };
   const stokPart = useMemo(() => statusPart(keluar, masuk), [keluar, masuk]);
 
   const hitung = useMemo(() => {
@@ -95,9 +109,7 @@ export function JadwalMaintenance({ auth, onNavigasi }: { auth: AuthState; onNav
   }, [semua]);
 
   const daftar = useMemo(() => {
-    const q = cari.trim().toLowerCase();
-    const f = semua.filter((j) => (kegiatan === 'ALL' || j.kegiatan === kegiatan) && (status === 'ALL' || j.status === status)
-      && (!q || j.peralatan.toLowerCase().includes(q)));
+    const f = semua.filter((j) => status === 'ALL' || j.status === status);
     const arah = urut.arah === 'asc' ? 1 : -1;
     const bobot: Record<StatusJadwal, number> = { Terlambat: 0, Segera: 1, Terjadwal: 2, 'Cek Data': 3 };
     return [...f].sort((a, b) => {
@@ -108,7 +120,7 @@ export function JadwalMaintenance({ auth, onNavigasi }: { auth: AuthState; onNav
         default: return ((bobot[a.status] - bobot[b.status]) || (a.sisaHari - b.sisaHari)) * arah;
       }
     });
-  }, [semua, kegiatan, status, cari, urut]);
+  }, [semua, status, urut]);
 
   useEffect(() => { setHal(1); }, [site, kegiatan, status, cari, urut, std]);
   const totalHal = Math.max(1, Math.ceil(daftar.length / PER_HALAMAN));
@@ -121,7 +133,7 @@ export function JadwalMaintenance({ auth, onNavigasi }: { auth: AuthState; onNav
     return {
       peralatan,
       biaya12: semua.reduce((t, j) => t + j.biaya12Bln, 0),
-      ohTahunIni: semua.filter((j) => j.kegiatan === 'OH').reduce((t, j) => t + j.kejadian.filter((x) => new Date(x.waktu).getFullYear() === tahunIni).length, 0),
+      kejadianTahunIni: semua.reduce((t, j) => t + j.kejadian.filter((x) => new Date(x.waktu).getFullYear() === tahunIni).length, 0),
       sebulan: semua.filter((j) => j.status !== 'Cek Data' && j.sisaHari >= 0 && j.sisaHari <= 30).length,
     };
   }, [semua]);
@@ -139,7 +151,7 @@ export function JadwalMaintenance({ auth, onNavigasi }: { auth: AuthState; onNav
     return grup;
   }, [semua]);
 
-  const bulanan = useMemo(() => biayaBulanan(keluarF), [keluarF]);
+  const bulanan = useMemo(() => biayaBulanan(keluarTampil), [keluarTampil]);
   const peringkat = useMemo(() => {
     const m = new Map<string, { nama: string; site: string; biaya: number; n: number }>();
     for (const j of semua) {
@@ -227,16 +239,16 @@ export function JadwalMaintenance({ auth, onNavigasi }: { auth: AuthState; onNav
         <>
           {/* ── Angka kunci ── */}
           <div className="eam-kpis">
-            <KpiKartu ikon={AlertTriangle} warna="#F87171" label="Terlambat" nilai={angka(hitung.Terlambat)} sub="melewati jatuh tempo" onKlik={() => setStatus('Terlambat')} />
-            <KpiKartu ikon={CalendarClock} warna="#F59E0B" label="Jatuh Tempo ≤ 30 Hari" nilai={angka(k.sebulan)} sub={`${angka(hitung.Segera)} dalam 14 hari`} onKlik={() => setStatus('Segera')} />
+            <KpiKartu ikon={AlertTriangle} warna="#F87171" label="Terlambat" nilai={angka(hitung.Terlambat)} sub="melewati jatuh tempo" onKlik={() => pilihStatus('Terlambat')} />
+            <KpiKartu ikon={CalendarClock} warna="#F59E0B" label="Jatuh Tempo ≤ 30 Hari" nilai={angka(k.sebulan)} sub={`${angka(hitung.Segera)} dalam 14 hari`} onKlik={() => pilihStatus('Segera')} />
             <KpiKartu ikon={Wrench} warna="#60A5FA" label="Peralatan Terpantau" nilai={angka(k.peralatan)} sub={`${angka(semua.length)} jadwal kegiatan`} />
             <KpiKartu ikon={Wallet} warna="#34D399" label="Biaya 12 Bulan" nilai={rupiahRingkas(k.biaya12)} sub="part & oli yang dipakai" onKlik={() => onNavigasi({ ke: 'laporan', mode: 'OUT' })} />
-            <KpiKartu ikon={Gauge} warna="#A78BFA" label="Overhaul Tahun Ini" nilai={angka(k.ohTahunIni)} sub="kejadian tercatat" />
+            <KpiKartu ikon={Gauge} warna="#A78BFA" label={kegiatan === 'ALL' ? 'Kegiatan Tahun Ini' : `${NAMA_KEGIATAN[kegiatan]} Tahun Ini`} nilai={angka(k.kejadianTahunIni)} sub="kejadian tercatat" />
           </div>
 
           {/* ── Agenda + tren ── */}
           <div className="sp2-row" style={{ marginTop: '1rem' }}>
-            <Panel judul="Agenda 90 Hari ke Depan" baca="Yang terlambat tampil paling atas, lalu per bulan. Klik untuk rincian.">
+            <Panel judul={`Agenda 90 Hari ke Depan${ketFilter}`} baca="Yang terlambat tampil paling atas, lalu per bulan. Klik untuk rincian.">
               {agenda.length === 0 ? <div className="sp2-kosong">Tidak ada jadwal yang jatuh tempo dalam 90 hari.</div> : (
                 <div className="jm-agenda" style={{ maxHeight: 440, overflowY: 'auto', paddingRight: 4 }}>
                   {agenda.map((g) => (
@@ -262,7 +274,7 @@ export function JadwalMaintenance({ auth, onNavigasi }: { auth: AuthState; onNav
             </Panel>
 
             <div style={{ display: 'grid', gap: '1rem', alignContent: 'start' }}>
-              <Panel judul="Biaya Perawatan per Bulan" baca="Total part dan oli yang dipakai untuk perawatan peralatan tiap bulan." tinggi={220}>
+              <Panel judul={`Biaya Perawatan per Bulan${ketFilter}`} baca="Total part dan oli yang dipakai untuk perawatan peralatan tiap bulan." tinggi={220}>
                 {bulanan.length < 2 ? <div className="sp2-kosong">Data bulanan belum cukup untuk grafik.</div> : (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={bulanan} margin={{ top: 8, right: 14, left: 4, bottom: 0 }}>
@@ -275,17 +287,17 @@ export function JadwalMaintenance({ auth, onNavigasi }: { auth: AuthState; onNav
                   </ResponsiveContainer>
                 )}
               </Panel>
-              <Panel judul="Peralatan Paling Banyak Memakan Biaya" baca="Biaya part dan oli 12 bulan terakhir.">
+              <Panel judul={`Peralatan Paling Banyak Memakan Biaya${ketFilter}`} baca="Biaya part dan oli 12 bulan terakhir.">
                 <Peringkat baris={peringkat} warna={W['--wr-warn']} kosong="Belum ada biaya tercatat dalam 12 bulan terakhir." />
               </Panel>
             </div>
           </div>
 
           {/* ── Tabel jadwal ── */}
-          <section className="glass-panel sp2-panel" aria-label="Jadwal per peralatan">
+          <section id="jm-tabel" className="glass-panel sp2-panel" aria-label="Jadwal per peralatan" style={{ scrollMarginTop: 90 }}>
             <div className="sp2-ph">
               <div>
-                <h3 className="sp2-h3">Jadwal per Peralatan</h3>
+                <h3 className="sp2-h3">Jadwal per Peralatan{ketFilter}</h3>
                 <p className="sp2-baca">{angka(daftar.length)} dari {angka(semua.length)} jadwal. Jatuh tempo = kegiatan terakhir + interval khas peralatan itu; tanda “perkiraan” berarti riwayatnya baru satu kali.</p>
               </div>
             </div>
