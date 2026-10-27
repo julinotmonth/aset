@@ -150,6 +150,27 @@ select.fm-input option { background: var(--bg-surface); color: var(--txt-primary
 .fm-sw.is-on { border-color: var(--bg-surface); box-shadow: 0 0 0 2px var(--sw); }
 .fm-sw:focus-visible, .fm-role:focus-visible, .fm-close:focus-visible { outline: 2px solid var(--ce-green); outline-offset: 2px; }
 
+/* Kolom password: tombol lihat / salin / acak di dalam input */
+.fm-input-pw { padding-right: 7.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.02em; }
+.fm-pw-actions { position: absolute; right: 0.35rem; top: 50%; transform: translateY(-50%); display: flex; gap: 0.1rem; }
+.fm-iconbtn {
+  width: 34px; height: 34px; border-radius: 8px; border: none; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--txt-muted);
+  transition: background 0.15s, color 0.15s;
+}
+.fm-iconbtn:hover:not(:disabled) { background: var(--chip-bg); color: var(--txt-primary); }
+.fm-iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.fm-iconbtn:focus-visible { outline: 2px solid var(--ce-green); outline-offset: 1px; }
+.fm-inputwrap .fm-pw-actions svg { position: static; transform: none; pointer-events: none; }
+.fm-meter { display: flex; align-items: center; gap: 0.55rem; margin-top: 0.5rem; font-size: 0.74rem; font-weight: 700; }
+.fm-meter-bars { display: flex; gap: 4px; flex: 1; max-width: 140px; }
+.fm-meter-bars span { flex: 1; height: 5px; border-radius: 99px; background: var(--border-subtle); transition: background 0.2s; }
+.fm-meter-len { margin-left: auto; font-weight: 500; color: var(--txt-muted); }
+.fm-spin { animation: fm-spin 0.8s linear infinite; }
+@keyframes fm-spin { to { transform: rotate(360deg); } }
+.btn-primary:disabled { opacity: 0.7; cursor: progress; }
+
 @media (max-width: 600px) {
   .fm-overlay { align-items: flex-end; padding: 0; }
   .fm-panel, .fm-panel.fm-sm {
@@ -164,5 +185,6 @@ select.fm-input option { background: var(--bg-surface); color: var(--txt-primary
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fm-input, .fm-role { transition: none; }
+  .fm-input, .fm-role, .fm-iconbtn, .fm-meter-bars span { transition: none; }
+  .fm-spin { animation: none; }
 }

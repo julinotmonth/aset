@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Save, ImagePlus, User as UserIcon, Mail, Briefcase, ShieldCheck, MapPin } from 'lucide-react';
+import { X, Save, ImagePlus, User as UserIcon, Mail, Briefcase, ShieldCheck, MapPin, KeyRound, Eye, EyeOff, Dices, Copy, Check, Loader2 } from 'lucide-react';
 import type { AppUser, SiteFilter, UserRole } from '../../types';
 import { getSites, useSitesRefresh } from '../../data/siteStore';
 import { labelPenuh } from './siteLabel';
+import { buatPasswordAcak, cekPassword, kekuatanPassword, salinTeks } from '../../lib/password';
 import './formModal.css';
 
 interface UserFormModalProps {
@@ -12,8 +13,12 @@ interface UserFormModalProps {
    *  'self'  = the logged-in user editing their own profile (name/photo/position only). */
   mode: 'admin' | 'self';
   userToEdit: AppUser | null;
+  /** Password yang tersimpan untuk akun yang sedang diedit (null = belum tersimpan). Hanya mode 'admin'. */
+  currentPassword?: string | null;
+  /** True selama permintaan simpan berjalan — tombol dikunci agar tidak terkirim dua kali. */
+  isSaving?: boolean;
   onClose: () => void;
-  onSave: (data: Partial<AppUser> & { id?: string }) => void;
+  onSave: (data: Partial<AppUser> & { id?: string; password?: string }) => void;
 }
 
 const ROLE_OPTIONS: { value: UserRole; label: string; desc: string }[] = [
@@ -22,7 +27,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string; desc: string }[] = [
   { value: 'Maintenance Engineer', label: 'Maintenance Engineer', desc: 'Fokus servis & maintenance' },
 ];
 
-export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, userToEdit, onClose, onSave }) => {
+export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, userToEdit, currentPassword, isSaving, onClose, onSave }) => {
   useSitesRefresh(); // daftar site selalu ikut data terbaru (tambah/edit/hapus site)
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -34,9 +39,16 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const [imageError, setImageError] = useState('');
   const [formError, setFormError] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(true);
+  const [pwCopied, setPwCopied] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
+      // Akun baru: kolom kosong & terlihat. Edit: terisi password tersimpan (bila ada) & disembunyikan.
+      setPassword(userToEdit ? (currentPassword ?? '') : '');
+      setShowPw(!userToEdit);
+      setPwCopied(false);
       setName(userToEdit?.name ?? '');
       setEmail(userToEdit?.email ?? '');
       setPosition(userToEdit?.position ?? '');
@@ -46,7 +58,13 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
       setImageError('');
       setFormError('');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentPassword ditangani efek terpisah di bawah
   }, [isOpen, userToEdit]);
+
+  // Daftar password bisa selesai dimuat setelah modal terbuka — isi kolom bila pengguna belum mengetik apa pun.
+  useEffect(() => {
+    if (isOpen && userToEdit && currentPassword) setPassword((p) => p || currentPassword);
+  }, [isOpen, userToEdit, currentPassword]);
 
   // Esc untuk menutup + kunci scroll halaman di belakang modal.
   useEffect(() => {
@@ -100,6 +118,16 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
       setFormError('Email wajib diisi.');
       return;
     }
+    if (mode === 'admin') {
+      const wajib = !userToEdit; // akun baru wajib punya password; saat edit boleh dikosongkan (= tidak diubah)
+      if (wajib && !password) { setFormError('Password wajib diisi (atau klik "Buat acak").'); return; }
+      if (password) {
+        const salah = cekPassword(password);
+        if (salah) { setFormError(salah); return; }
+      }
+    }
+    // Saat edit, kirim password hanya bila benar-benar berubah dari yang tersimpan.
+    const kirimPassword = mode === 'admin' && password && password !== (userToEdit ? currentPassword ?? '' : '') ? password : undefined;
     onSave({
       id: userToEdit?.id,
       name: name.trim(),
@@ -108,7 +136,22 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
       role,
       assignedSite,
       avatarUrl,
+      ...(kirimPassword ? { password: kirimPassword } : {}),
     });
+  };
+
+  const kekuatan = kekuatanPassword(password);
+  const salinPassword = async () => {
+    if (!password) return;
+    if (await salinTeks(password)) {
+      setPwCopied(true);
+      setTimeout(() => setPwCopied(false), 1800);
+    }
+  };
+  const buatAcak = () => {
+    setPassword(buatPasswordAcak(12));
+    setShowPw(true);
+    setFormError('');
   };
 
   const initials = name.trim().split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
@@ -184,6 +227,52 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
                 </div>
 
                 <div>
+                  <label className="fm-label" htmlFor="fm-password">Password</label>
+                  <div className="fm-inputwrap">
+                    <KeyRound size={15} />
+                    <input
+                      id="fm-password"
+                      className="fm-input fm-input-pw"
+                      type={showPw ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => { setPassword(e.target.value); setFormError(''); }}
+                      placeholder={userToEdit ? (currentPassword ? '' : 'Kosongkan bila tidak diubah') : 'Ketik password, atau klik "Buat acak"'}
+                      autoComplete="new-password"
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      aria-describedby="fm-pw-hint"
+                    />
+                    <div className="fm-pw-actions">
+                      <button type="button" className="fm-iconbtn" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? 'Sembunyikan password' : 'Tampilkan password'} title={showPw ? 'Sembunyikan' : 'Tampilkan'}>
+                        {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                      <button type="button" className="fm-iconbtn" onClick={salinPassword} disabled={!password} aria-label="Salin password" title="Salin">
+                        {pwCopied ? <Check size={16} color="#00D084" /> : <Copy size={16} />}
+                      </button>
+                      <button type="button" className="fm-iconbtn" onClick={buatAcak} aria-label="Buat password acak" title="Buat acak">
+                        <Dices size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  {password && (
+                    <div className="fm-meter" aria-live="polite">
+                      <div className="fm-meter-bars" aria-hidden="true">
+                        {[1, 2, 3, 4].map((n) => <span key={n} style={{ background: n <= kekuatan.skor ? kekuatan.warna : undefined }} />)}
+                      </div>
+                      <span style={{ color: kekuatan.warna }}>{kekuatan.label}</span>
+                      <span className="fm-meter-len">{password.length} karakter</span>
+                    </div>
+                  )}
+                  <p className="fm-hint" id="fm-pw-hint">
+                    {userToEdit
+                      ? (currentPassword
+                          ? 'Password saat ini ditampilkan di atas. Ubah isinya untuk menggantinya.'
+                          : 'Password lama belum tersimpan. Isi untuk mengatur password baru; kosongkan bila tidak ingin mengubah.')
+                      : 'Minimal 6 karakter. Password ini juga tampil di daftar Kelola Pengguna agar mudah dibagikan.'}
+                  </p>
+                </div>
+
+                <div>
                   <span className="fm-label">Level Akses (Role)</span>
                   <div className="fm-roles" role="group" aria-label="Level akses">
                     {ROLE_OPTIONS.map((opt) => (
@@ -219,9 +308,9 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({ isOpen, mode, user
           </div>
 
           <div className="fm-foot">
-            <button type="submit" className="btn-primary">
-              <Save size={16} />
-              {submitLabel}
+            <button type="submit" className="btn-primary" disabled={isSaving} aria-busy={isSaving || undefined}>
+              {isSaving ? <Loader2 size={16} className="fm-spin" /> : <Save size={16} />}
+              {isSaving ? 'Menyimpan…' : submitLabel}
             </button>
           </div>
         </form>

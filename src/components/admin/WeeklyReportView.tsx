@@ -269,9 +269,13 @@ interface Props {
   mode: LaporanMode;
   /** Sembunyikan judul halaman (dipakai saat disematkan di halaman lain). */
   tanpaHeader?: boolean;
+  /** Konteks dari Global Search: buka langsung di site / tahun / kata kunci hasil yang diklik. */
+  siteFokus?: string;
+  tahunFokus?: number;
+  cariFokus?: string;
 }
 
-export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
+export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFokus, cariFokus }: Props) {
   const sites = getSites();
   const isSuperAdmin = auth.role === 'Super Admin';
   // Super Admin dibuka di Wunut (site yang datanya sudah berjalan), user site
@@ -280,8 +284,10 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
     ? auth.assignedSite
     : (sites.find((s) => s.key === 'wunut')?.key ?? sites[0]?.key ?? 'wunut');
 
-  const [site, setSite] = useState(siteAwal);
-  const [tahun, setTahun] = useState(new Date().getFullYear());
+  // User yang terkunci ke satu site tidak boleh dialihkan ke site lain lewat konteks pencarian.
+  const siteDiizinkan = siteFokus && (isSuperAdmin || !auth.assignedSite || auth.assignedSite === 'global' || auth.assignedSite === siteFokus);
+  const [site, setSite] = useState(siteDiizinkan ? siteFokus : siteAwal);
+  const [tahun, setTahun] = useState(tahunFokus ?? new Date().getFullYear());
   const [bulan, setBulan] = useState<number | 0>(0);
   // `arah` = jenis data harian terakhir yang dipilih (IN/OUT/ASET). Mode lain
   // (PICA, Work Target, Outstanding PR, Safety Stock) tidak mengubahnya, jadi
@@ -594,7 +600,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader }: Props) {
   }, [rows]);
 
   type KolomAset = 'kode' | 'namaBarang' | 'jenis' | 'kelas' | 'sub' | 'merk' | 'tipe' | 'alokasi' | 'tahun' | 'jumlah' | 'totalHarga' | 'statusSmr';
-  const [cariAset, setCariAset] = useState('');
+  const [cariAset, setCariAset] = useState(cariFokus ?? '');
   const [sortKolomAset, setSortKolomAset] = useState<KolomAset>('namaBarang');
   const [sortMenurunAset, setSortMenurunAset] = useState(false);
   type Kelompok = 'kategori' | 'subbab' | 'datar';

@@ -23,9 +23,11 @@ interface Props {
   auth: AuthState;
   tab: AsetTab;
   onTabChange: (t: AsetTab) => void;
+  /** Konteks dari Global Search: site/tahun/kata kunci yang langsung dipakai di Asset Management. */
+  fokus?: { n: number; site?: string; tahun?: number; cari?: string } | null;
 }
 
-export function AsetTetapView({ auth, tab, onTabChange }: Props) {
+export function AsetTetapView({ auth, tab, onTabChange, fokus }: Props) {
   return (
     <>
       <style>{WR_CSS}{EAM_CSS}</style>
@@ -45,7 +47,7 @@ export function AsetTetapView({ auth, tab, onTabChange }: Props) {
       </div>
 
       {tab === 'RINGKASAN' && <AsetRingkasan auth={auth} onBuka={onTabChange} />}
-      {tab === 'ASSET_MGMT' && <WeeklyReportView auth={auth} mode="ASET" tanpaHeader />}
+      {tab === 'ASSET_MGMT' && <WeeklyReportView key={fokus?.n ?? 0} auth={auth} mode="ASET" tanpaHeader siteFokus={fokus?.site} tahunFokus={fokus?.tahun} cariFokus={fokus?.cari} />}
     </>
   );
 }

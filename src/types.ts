@@ -123,6 +123,10 @@ export interface AppUser {
   createdAt: string;
 }
 
+/** Password tiap akun, hanya untuk Super Admin: { [userId]: password | null }.
+ *  null = belum tersimpan (akun lama) — isi lewat Edit, atau otomatis setelah akun itu login. */
+export type UserCredentials = Record<string, string | null>;
+
 export interface AuthState {
   isAuthenticated: boolean;
   userId?: string;

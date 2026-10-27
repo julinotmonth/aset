@@ -18,6 +18,7 @@ import {
   AlertOctagon,
   ArrowRight,
   ChevronDown,
+  Search,
 } from 'lucide-react';
 import type { AuthState, SparePart, SiteFilter, ActivityLog, SiteLocation, AppUser, FixedAsset, WorkOrder, ReportsSummary } from '../../types';
 import { getSparePartCategories } from '../../data/categoryStore';
@@ -36,14 +37,12 @@ import { NotifPerubahanLaporan } from './NotifPerubahanLaporan';
 import { WeeklyReportView } from './WeeklyReportView';
 import { LaporanRingkasan } from './LaporanRingkasan';
 import {
-  GlobalSearchView,
   CategoriesView,
   AssignmentsView,
   MaintenanceView,
   AuditView,
   ProductLinesView,
   GalleryView,
-  UserManagementView,
   ACTION_META,
   parseLogDate,
   timeAgo,
@@ -54,6 +53,8 @@ import { AsetTetapView } from './AsetTetapView';
 import { JadwalMaintenance, type TujuanNav } from './JadwalMaintenance';
 import { SiteOperasionalView } from './SiteOperasionalView';
 import { TimLapangan } from './TimLapangan';
+import { UserManagementView } from './KelolaPengguna';
+import { GlobalSearchView, GlobalSearchPalette, type FokusLaporan } from './GlobalSearch';
 
 interface AdminDashboardProps {
   auth: AuthState;
@@ -82,6 +83,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
     else if (t.ke === 'jadwal') setActiveView('work-orders');
     else { setAsetTab(t.tab); setActiveView('asset-registry'); }
   };
+  // Konteks dari Global Search: site/tahun yang harus langsung terbuka di halaman tujuan.
+  // `n` berubah tiap kali agar halaman tujuan dibuat ulang dan memakai konteks barunya.
+  const [fokus, setFokus] = useState<(FokusLaporan & { n: number }) | null>(null);
+  const bukaLaporanFokus = (mode: LaporanMode, f: FokusLaporan) => {
+    setFokus({ ...f, n: Date.now() });
+    setLaporanMode(mode);
+    setActiveView('weekly-report');
+  };
+  const bukaAsetFokus = (tab: AsetTab, f: FokusLaporan) => {
+    setFokus({ ...f, n: Date.now() });
+    setAsetTab(tab);
+    setActiveView('asset-registry');
+  };
+  // Global Search jendela cepat — Ctrl/⌘+K dari halaman mana pun.
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   // ── Theme (dark / light) ────────────────────────────────────────────────
@@ -173,21 +199,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
       : null);
   const isSuperAdmin = auth.role === 'Super Admin';
 
-  const handleAddUser = async (data: Partial<AppUser>) => {
+  const handleAddUser = async (data: Partial<AppUser> & { password?: string }): Promise<boolean> => {
     try {
       const { temporaryPassword, ...newUser } = await api.post<AppUser & { temporaryPassword?: string }>('/users', data);
       setUsers((prev) => [...prev, newUser]);
-      showToast(`Akun ${newUser.name} berhasil ditambahkan.`);
-      // Password sementara acak hanya dikirim sekali oleh server — tampilkan agar bisa disalin.
-      if (temporaryPassword) {
-        window.alert(`Akun dibuat untuk ${newUser.email}\n\nPassword sementara (hanya tampil sekali, salin sekarang):\n${temporaryPassword}`);
-      }
+      // Normalnya password dipilih sendiri di form. Bila dikosongkan, server membuat password acak
+      // (dikirim sekali) — tampilkan di toast; selanjutnya selalu bisa dilihat di Kelola Pengguna.
+      showToast(temporaryPassword
+        ? `Akun ${newUser.name} ditambahkan. Password acak: ${temporaryPassword}`
+        : `Akun ${newUser.name} berhasil ditambahkan.`);
+      return true;
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Gagal menambah akun.');
+      return false;
     }
   };
 
-  const handleUpdateUser = async (id: string, data: Partial<AppUser>) => {
+  const handleUpdateUser = async (id: string, data: Partial<AppUser> & { password?: string }): Promise<boolean> => {
     try {
       const updated = await api.patch<AppUser>(`/users/${encodeURIComponent(id)}`, data);
       setUsers((prev) => prev.map((u) => (u.id === id ? updated : u)));
@@ -202,19 +230,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           assignedSite: updated.assignedSite,
         });
       }
-      showToast('Profil berhasil diperbarui.');
+      showToast(data.password ? `Akun ${updated.name} diperbarui, password baru tersimpan.` : 'Profil berhasil diperbarui.');
+      return true;
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Gagal memperbarui profil.');
+      return false;
     }
   };
 
-  const handleDeleteUser = async (id: string) => {
+  const handleDeleteUser = async (id: string): Promise<boolean> => {
     try {
       await api.delete(`/users/${encodeURIComponent(id)}`);
       setUsers((prev) => prev.filter((u) => u.id !== id));
       showToast('Akun pengguna dihapus.');
+      return true;
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Gagal menghapus akun.');
+      return false;
     }
   };
 
@@ -269,6 +301,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const propsCari = {
+    auth,
+    users,
+    onNavigasi: bukaDariJadwal,
+    onBuka: setActiveView,
+    onBukaLaporan: bukaLaporanFokus,
+    onBukaAset: bukaAsetFokus,
   };
 
   // Filter site untuk Dashboard. (Halaman Spare Part punya filter sendiri di SparePartView.)
@@ -483,6 +524,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
 
           <div className="admin-actions">
             <button
+              type="button"
+              onClick={() => setIsPaletteOpen(true)}
+              className="btn-chip"
+              title="Global Search (Ctrl+K)"
+              aria-label="Buka Global Search"
+              aria-keyshortcuts="Control+K Meta+K"
+              style={{ color: 'var(--txt-tertiary)' }}
+            >
+              <Search size={18} />
+            </button>
+
+            <button
               onClick={toggleTheme}
               className="btn-chip theme-toggle-btn"
               title={theme === 'dark' ? 'Ganti ke mode terang' : 'Ganti ke mode gelap'}
@@ -600,7 +653,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         )}
 
         {activeView === 'global-search' && (
-          <GlobalSearchView spareParts={spareParts} logs={logs} onNavigate={setActiveView} />
+          <GlobalSearchView {...propsCari} />
         )}
         {activeView === 'categories' && <CategoriesView spareParts={spareParts} />}
         {activeView === 'assignments' && (
@@ -615,7 +668,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           />
         )}
         {activeView === 'asset-registry' && (
-          <AsetTetapView auth={auth} tab={asetTab} onTabChange={setAsetTab} />
+          <AsetTetapView auth={auth} tab={asetTab} onTabChange={setAsetTab} fokus={fokus} />
         )}
         {activeView === 'work-orders' && <JadwalMaintenance auth={auth} onNavigasi={bukaDariJadwal} />}
         {activeView === 'reports' && (
@@ -623,7 +676,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         )}
         {activeView === 'weekly-report' && (laporanMode === 'RINGKASAN_LAPORAN'
           ? <LaporanRingkasan auth={auth} onBuka={(m) => setLaporanMode(m)} />
-          : <WeeklyReportView auth={auth} mode={laporanMode} />)}
+          : <WeeklyReportView key={fokus?.n ?? 0} auth={auth} mode={laporanMode} siteFokus={fokus?.site} tahunFokus={fokus?.tahun} />)}
         {activeView === 'audit' && <AuditView logs={logs} />}
         {activeView === 'branches' && (
           <SiteOperasionalView auth={auth} spareParts={spareParts} onSitesChanged={() => setSitesVersion((v) => v + 1)} onNavigasi={bukaDariJadwal} />
@@ -756,6 +809,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           </div>
         </div>
       )}
+
+      <GlobalSearchPalette {...propsCari} isOpen={isPaletteOpen} onClose={() => setIsPaletteOpen(false)} />
 
       {/* Modals */}
       <AddEditSparePartModal
