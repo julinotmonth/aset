@@ -32,6 +32,7 @@ import type { LaporanMode } from './Sidebar';
 import { labelSiteDariKey, labelPenuh } from './siteLabel';
 import { SumberSemuaSite } from './SumberSemuaSite';
 import { api } from '../../lib/api';
+import { jalankanSync } from '../../lib/syncClient';
 import { getSites } from '../../data/siteStore';
 import { PicaView } from './PicaView';
 import { WorkTargetView } from './WorkTargetView';
@@ -314,7 +315,8 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   const [source, setSource] = useState<SheetSource | null>(null);
   const [memuat, setMemuat] = useState(true);
   const [menyinkron, setMenyinkron] = useState(false);
-  const [pesan, setPesan] = useState<{ tipe: 'ok' | 'error'; teks: string } | null>(null);
+  const [pesan, setPesan] = useState<{ tipe: 'ok' | 'error'; teks: string; ulang?: boolean } | null>(null);
+  const [progresSync, setProgresSync] = useState('');
   const [panelSumberTerbuka, setPanelSumberTerbuka] = useState(false);
   const [semuaSiteTerbuka, setSemuaSiteTerbuka] = useState(false);
   const [urlSheet, setUrlSheet] = useState('');
@@ -329,7 +331,14 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
 
   const siteTerkunci = !isSuperAdmin && auth.assignedSite !== 'global';
   const labelSite = sites.find((s) => s.key === site)?.label ?? site;
+  // Pemuatan latar belakang (polling) tidak boleh bertumpuk, dan respons lama (mis. dari site yang
+  // sudah ditinggalkan, atau yang terlambat karena server baru bangun) tidak boleh menimpa yang baru.
+  const sedangMemuat = useRef(false);
+  const idMuat = useRef(0);
   const muatData = useCallback(async (diam = false) => {
+    if (diam && sedangMemuat.current) return;
+    const id = ++idMuat.current;
+    sedangMemuat.current = true;
     if (!diam) setMemuat(true);
     try {
       const q = new URLSearchParams({ site, direction: arah });
@@ -347,6 +356,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         api.get<SheetSource | null>(`/weekly-reports/source?site=${site}`),
         arah === 'IN' ? api.get<WeeklyRow[]>(`/weekly-reports?${qVendor}`) : Promise.resolve<WeeklyRow[]>([]),
       ]);
+      if (id !== idMuat.current) return;
       setRows(data);
       setDataVendor(vendorSetahun);
       setVolumes(Object.fromEntries(vol.map((v) => [v.minggu, v.m3])));
@@ -357,19 +367,26 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         else { setUrlSheet(''); setTabsInput(TAB_DEFAULT(site).join('\n')); }
       }
     } catch (err) {
-      setPesan({ tipe: 'error', teks: (err as Error).message });
+      // Pemuatan latar belakang yang gagal diabaikan: data lama tetap tampil dan banner koneksi sudah
+      // memberi tahu bila server sedang bangun. Error merah hanya untuk pemuatan yang diminta pengguna.
+      if (!diam && id === idMuat.current) setPesan({ tipe: 'error', teks: (err as Error).message, ulang: true });
     } finally {
-      setMemuat(false);
+      sedangMemuat.current = false;
+      if (id === idMuat.current) setMemuat(false);
     }
   }, [site, tahun, bulan, arah, siteTerkunci]);
 
   useEffect(() => { void muatData(); }, [muatData]);
 
-  // "Realtime": tarik ulang tiap 30 detik tanpa mengedipkan layar.
+  // "Realtime": tarik ulang tiap 30 detik tanpa mengedipkan layar. Dilewati saat tab tidak terlihat atau
+  // saat sync berjalan (data akan dimuat ulang sendiri begitu sync selesai); begitu tab kembali terlihat,
+  // langsung segarkan.
   useEffect(() => {
-    const t = setInterval(() => { void muatData(true); }, 30_000);
-    return () => clearInterval(t);
-  }, [muatData]);
+    const t = setInterval(() => { if (!document.hidden && !menyinkron) void muatData(true); }, 30_000);
+    const saatTerlihat = () => { if (!document.hidden && !menyinkron) void muatData(true); };
+    document.addEventListener('visibilitychange', saatTerlihat);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', saatTerlihat); };
+  }, [muatData, menyinkron]);
 
   // ── Pivot biaya (mode BARANG KELUAR) ────────────────────────────────────
   const { mingguList, pivot, totalSeksi, grandTotal, kelompokKegiatan } = useMemo(() => {
@@ -711,20 +728,23 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   };
 
   const sinkronkan = async () => {
-    setMenyinkron(true); setPesan(null);
+    setMenyinkron(true); setPesan(null); setProgresSync('Memulai…');
     try {
-      const hasil = await api.post<{ hasil: { tab: string; total?: number; arah?: string; error?: string }[]; peringatan?: PeringatanTab[] }>(
-        '/weekly-reports/sync', { site });
+      // Sync berjalan sebagai job di server: klik langsung dijawab, kemajuan dipantau berkala.
+      const hasil = await jalankanSync(site, (job, bergabung) => {
+        const { selesai, total, tab } = job.progress;
+        setProgresSync(`${bergabung ? 'Mengikuti sync berjalan' : 'Menarik data'}… ${selesai}/${total}${tab && selesai < total ? ` · ${tab}` : ''}`);
+      });
       const gagal = hasil.hasil.filter((h) => h.error);
       const jumlah = hasil.hasil.reduce((s, h) => s + (h.total ?? 0), 0);
       const rincian = hasil.hasil.filter((h) => !h.error).map((h) => `${h.tab}: ${h.total ?? 0} baris ${h.arah === 'IN' ? 'masuk' : h.arah === 'OUT' ? 'keluar' : h.arah === 'ASET' ? 'aset' : ''}`.trim()).join(' · ');
-      const w = teksPeringatan(hasil.peringatan, labelPenuh(labelSite));
+      const w = teksPeringatan(hasil.peringatan as PeringatanTab[] | undefined, labelPenuh(labelSite));
       setPesan(gagal.length || w
         ? { tipe: 'error', teks: `${jumlah} baris tersinkron${gagal.length ? `, ${gagal.length} tab gagal: ${gagal.map((g) => `${g.tab} — ${g.error}`).join('; ')}` : ''}.${w ? ` Perhatian: ${w}` : ''}` }
         : { tipe: 'ok', teks: `${jumlah} baris berhasil disinkronkan${rincian ? ` (${rincian})` : ''}.` });
       await muatData(true);
     } catch (err) { setPesan({ tipe: 'error', teks: (err as Error).message }); }
-    finally { setMenyinkron(false); }
+    finally { setMenyinkron(false); setProgresSync(''); }
   };
 
   const unggahCsv = async (file: File) => {
@@ -732,7 +752,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     try {
       const csv = await file.text();
       const hasil = await api.post<{ inserted: number; updated: number; total: number }>(
-        '/weekly-reports/import', { site, tab: file.name, csv });
+        '/weekly-reports/import', { site, tab: file.name, csv }, { timeoutMs: 120_000, ulang: false });
       setPesan({ tipe: 'ok', teks: `${hasil.total} baris terbaca (${hasil.inserted} baru, ${hasil.updated} diperbarui).` });
       await muatData(true);
     } catch (err) { setPesan({ tipe: 'error', teks: (err as Error).message }); }
@@ -865,10 +885,10 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
           <Download size={15} /> Export
         </button>
 
-        <button type="button" className="wr-btn wr-btn--primary" onClick={sinkronkan} disabled={menyinkron || !source}
+        <button type="button" className="wr-btn wr-btn--primary" onClick={sinkronkan} disabled={menyinkron || !source} aria-busy={menyinkron || undefined}
           title={source ? 'Tarik ulang dari Google Spreadsheet' : 'Atur sumber sheet terlebih dahulu'}
           style={{ ...tombol, padding: '.5rem .95rem', cursor: source ? 'pointer' : 'not-allowed', opacity: source ? 1 : .5 }}>
-          {menyinkron ? <Loader2 size={15} /> : <RefreshCw size={15} />} Sync Sekarang
+          {menyinkron ? <Loader2 size={15} /> : <RefreshCw size={15} />} {menyinkron ? (progresSync || 'Menyinkron…') : 'Sync Sekarang'}
         </button>
       </div>
 
@@ -920,7 +940,13 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
           border: `1px solid ${(pesan.tipe === 'ok' ? NADA.in : NADA.neg).garis}`,
           color: (pesan.tipe === 'ok' ? NADA.in : NADA.neg).teks }}>
           {pesan.tipe === 'ok' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-          <span>{pesan.teks}</span>
+          <span style={{ flex: 1 }}>{pesan.teks}</span>
+          {pesan.ulang && (
+            <button type="button" className="wr-btn" onClick={() => { setPesan(null); void muatData(); }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem', padding: '.25rem .65rem', borderRadius: 8, cursor: 'pointer', fontSize: '.76rem', flexShrink: 0 }}>
+              <RefreshCw size={13} /> Coba lagi
+            </button>
+          )}
         </div>
       )}
 

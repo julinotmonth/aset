@@ -7,13 +7,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link2, X, Loader2, CheckCircle2, AlertTriangle, RefreshCw, ArrowRight, Info } from 'lucide-react';
 import { api } from '../../lib/api';
+import { jalankanSync } from '../../lib/syncClient';
 import { labelPenuh } from './siteLabel';
 import { NADA } from './wrTema';
 
 type Arah = 'IN' | 'OUT' | 'ASET';
 interface TabUsul { name: string; gid: string | null; arah: Arah; relevan: boolean; site: string | null; alasan: string }
 interface HasilDiscover { sheetId: string; sumber: 'otomatis' | 'manual'; sites: { key: string; label: string }[]; tabs: TabUsul[] }
-interface HasilSync { hasil: { tab: string; total?: number; error?: string }[] }
 type StatusSite = { tahap: 'menunggu' | 'jalan' | 'ok' | 'gagal'; baris?: number; galat?: string };
 
 const NAMA_ARAH: Record<Arah, string> = { IN: 'Barang Masuk', OUT: 'Barang Keluar', ASET: 'Aset' };
@@ -104,7 +104,7 @@ export function SumberSemuaSite({ urlAwal, onTutup, onSelesai }: { urlAwal: stri
     for (const d of daftar) {
       setProgres((p) => ({ ...p, [d.site]: { tahap: 'jalan' } }));
       try {
-        const h = await api.post<HasilSync>('/weekly-reports/sync', { site: d.site });
+        const h = await jalankanSync(d.site);
         const gagal = h.hasil.filter((x) => x.error);
         const baris = h.hasil.reduce((t, x) => t + (x.total ?? 0), 0);
         setProgres((p) => ({ ...p, [d.site]: gagal.length ? { tahap: 'gagal', baris, galat: gagal.map((g) => `${g.tab}: ${g.error}`).join(' · ') } : { tahap: 'ok', baris } }));

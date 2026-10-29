@@ -179,8 +179,8 @@ const SIDEBAR_CSS = `
 .sbx-link:focus-visible,.sbx-sub:focus-visible{outline:2px solid #00D084;outline-offset:-2px}
 .sbx-ico{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:rgb(var(--acc));background:rgba(var(--acc),.13);transition:background .15s,color .15s,box-shadow .15s}
 html[data-theme='light'] .sbx-ico{color:var(--acc-ink);background:rgba(var(--acc),.16)}
-.sbx-label{flex:1;min-width:0;line-height:1.25;overflow-wrap:anywhere}
-.sbx-link.is-locked{gap:.55rem}
+.sbx-label{flex:1;min-width:0;line-height:1.25;overflow-wrap:break-word;hyphens:none}
+.sbx-link.is-locked{gap:.45rem;padding-right:.4rem}
 .sbx-link.is-active{color:var(--txt-primary);background:linear-gradient(90deg,rgba(var(--acc),.18),rgba(var(--acc),.04))}
 .sbx-link.is-active::before{content:"";position:absolute;left:-.45rem;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:rgb(var(--acc))}
 .sbx-link.is-active .sbx-ico{color:#fff;background:linear-gradient(135deg,rgb(var(--acc)),rgba(var(--acc),.7));box-shadow:0 4px 12px rgba(var(--acc),.35)}
@@ -190,9 +190,9 @@ html[data-theme='light'] .sbx-link.is-active .sbx-ico{color:#fff;background:line
 .sbx-link.is-locked{color:var(--txt-muted);cursor:not-allowed}
 .sbx-link.is-locked .sbx-ico{filter:grayscale(.85);opacity:.6}
 .sbx-link.is-locked:hover{background:transparent}
-.sbx-soon{flex-shrink:0;font-size:.56rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:.12rem .38rem;margin-left:.15rem;border-radius:999px;color:#FBBF24;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.3)}
+.sbx-soon{flex-shrink:0;font-size:.54rem;font-weight:800;letter-spacing:.02em;text-transform:uppercase;padding:.1rem .32rem;margin-left:0;border-radius:999px;color:#FBBF24;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.3)}
 html[data-theme='light'] .sbx-soon{color:#92400E;background:rgba(251,191,36,.22)}
-.sbx-link .sbx-chev{margin-left:.25rem}
+.sbx-link .sbx-chev{margin-left:.1rem}
 .sbx-link>.sbx-chev:first-of-type{margin-left:auto}
 
 .sbx-subwrap{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .22s ease,opacity .18s ease}
