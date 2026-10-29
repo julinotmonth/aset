@@ -1007,7 +1007,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         <>
           {entitasTersedia.length > 1 && (
             <div style={{ marginBottom: '.85rem' }}>
-              <Segmen label="Entitas" nilai={entitas as Entitas}
+              <Segmen label={LABEL_ENTITAS[entitas as Entitas]} nilai={entitas as Entitas}
                 opsi={entitasTersedia.map((e) => ({ id: e, label: LABEL_ENTITAS[e] }))}
                 onUbah={setEntitasPilih} />
             </div>
@@ -1130,7 +1130,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         <>
           {entitasTersedia.length > 1 && (
             <div style={{ marginBottom: '.85rem' }}>
-              <Segmen label="Entitas" nilai={entitas as Entitas}
+              <Segmen label={LABEL_ENTITAS[entitas as Entitas]} nilai={entitas as Entitas}
                 opsi={entitasTersedia.map((e) => ({ id: e, label: LABEL_ENTITAS[e] }))}
                 onUbah={setEntitasPilih} />
             </div>
