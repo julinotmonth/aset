@@ -6,6 +6,11 @@
 //
 // Sumber data (semuanya sudah ada, tidak ada endpoint baru):
 //   • Barang Masuk / Keluar → /weekly-reports?direction=IN|OUT&tahun=…  (ikut filter tahun & site)
+//     Filter tambahan (dihitung di browser dari kolom `kode`, tanpa endpoint baru):
+//       – Periode : dropdown Semua / minggu tertentu / bulan tertentu → SEMUA angka & grafik Masuk/Keluar
+//                   ikut berubah (total nilai periode itu), bukan hanya grafiknya
+//       – Kode    : I-RDA / I-RCE / I-RET. Kode berawalan angka = kode aset, bukan spare part, jadi tidak
+//                   punya kategori sendiri di sini (tetap ikut terhitung pada pilihan "Semua")
 //   • Outstanding PR        → /outstanding-pr   (seluruh perusahaan)
 //   • Safety Stock          → /min-stock        (seluruh perusahaan)
 import { useEffect, useMemo, useState } from 'react';
@@ -24,6 +29,7 @@ import type { Nada } from './wrTema';
 import { KpiKartu, EAM_CSS } from './eamUi';
 import { angka, rupiahRingkas } from './eamHelpers';
 import type { LaporanMode } from './Sidebar';
+import { normKode } from './sparePartData';
 
 const rp = (n: number) => `Rp ${Math.round(n).toLocaleString('id-ID')}`;
 const fmtTooltip = (v: unknown) => rp(Number(v) || 0);
@@ -38,7 +44,7 @@ const tickRupiah = (n: number) => {
 const NAMA_BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 // ── Tipe payload (subset yang dipakai) ───────────────────────────────────
-interface BarisLaporan { minggu: number; bulan: number; totalHarga: number; alokasi: string; section: string }
+interface BarisLaporan { minggu: number; bulan: number; totalHarga: number; alokasi: string; section: string; kode: string; tanggal: string | null }
 interface OsData {
   grand: { pending: number; released: number; total: number };
   sites: { key: string; label: string; totals: { total: number } }[];
@@ -58,14 +64,90 @@ const SEKSI: Record<string, { nama: string; warna: string }> = {
   ISOTANK: { nama: 'ISO Tank', warna: 'var(--wr-pie-info)' },
 };
 
-/** Jumlahkan nilai per minggu; minggu yang kosong di antara data diisi 0 supaya jarak sumbu tidak menipu. */
-function deretMingguan(rows: BarisLaporan[]): { minggu: string; Nilai: number }[] {
-  if (!rows.length) return [];
+// ── Periode & kategori kode ──────────────────────────────────────────────
+type Granul = 'HARI' | 'MINGGU' | 'BULAN';
+type KodeKat = 'RDA' | 'RCE' | 'RET';
+type FilterKat = 'ALL' | KodeKat;
+type Pilihan = { jenis: 'ALL' } | { jenis: 'W' | 'B'; n: number };
+
+const KAT_KODE: { key: KodeKat; nama: string; ket: string }[] = [
+  { key: 'RDA', nama: 'RDA', ket: 'Kode berawalan I-RDA' },
+  { key: 'RCE', nama: 'RCE', ket: 'Kode berawalan I-RCE' },
+  { key: 'RET', nama: 'RET', ket: 'Kode berawalan I-RET' },
+];
+const NAMA_KAT: Record<FilterKat, string> = { ALL: 'Semua kode', RDA: 'RDA', RCE: 'RCE', RET: 'RET' };
+const NAMA_BULAN_PENUH = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+// Awalan "I-" boleh tidak ada; huruf sesudah RDA/RCE/RET tidak boleh langsung huruf lagi
+// supaya kode kontainer ISO Tank (mis. RDAU1581209) tidak ikut terhitung sebagai RDA.
+// Kode berawalan angka (mis. 01.11-2026-0033) adalah kode ASET → bukan RDA/RCE/RET → null.
+const POLA_KAT = /^(?:I-?)?(RDA|RCE|RET)(?![A-Z])/;
+function kategoriKode(kode: string): KodeKat | null {
+  const m = POLA_KAT.exec(normKode(kode));
+  return m ? (m[1] as KodeKat) : null;
+}
+
+/** Nilai dropdown periode: "ALL", "W:12" (minggu 12) atau "B:3" (bulan Maret). */
+function parsePilihan(v: string): Pilihan {
+  const m = /^([WB]):(\d+)$/.exec(v);
+  return m ? { jenis: m[1] as 'W' | 'B', n: Number(m[2]) } : { jenis: 'ALL' };
+}
+const lolosPilihan = (r: BarisLaporan, p: Pilihan) =>
+  p.jenis === 'ALL' || (p.jenis === 'W' ? Number(r.minggu) === p.n : Number(r.bulan) === p.n);
+
+const nilaiBaris = (r: BarisLaporan) => Number(r.totalHarga) || 0;
+const jumlah = (rows: BarisLaporan[]) => rows.reduce((t, r) => t + nilaiBaris(r), 0);
+const namaGranul = (g: Granul) => (g === 'HARI' ? 'hari' : g === 'MINGGU' ? 'minggu' : 'bulan');
+
+const HARI_MS = 86_400_000;
+function kunciWaktu(r: BarisLaporan, g: Granul): number | null {
+  if (g === 'MINGGU') return Number(r.minggu) || null;
+  if (g === 'BULAN') return Number(r.bulan) || null;
+  const t = r.tanggal ? Date.parse(String(r.tanggal).slice(0, 10)) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+function labelWaktu(n: number, g: Granul): string {
+  if (g === 'MINGGU') return `W${n}`;
+  if (g === 'BULAN') return NAMA_BULAN[n - 1] ?? `B${n}`;
+  const d = new Date(n);
+  return `${d.getUTCDate()} ${NAMA_BULAN[d.getUTCMonth()]}`;
+}
+
+/** Jumlahkan nilai per hari / minggu / bulan. */
+function petaWaktu(rows: BarisLaporan[], g: Granul): Map<number, number> {
   const per = new Map<number, number>();
-  for (const r of rows) per.set(r.minggu, (per.get(r.minggu) ?? 0) + (Number(r.totalHarga) || 0));
-  const ada = [...per.keys()];
-  const awal = Math.min(...ada), akhir = Math.max(...ada);
-  return Array.from({ length: akhir - awal + 1 }, (_, i) => ({ minggu: `W${awal + i}`, Nilai: per.get(awal + i) ?? 0 }));
+  for (const r of rows) {
+    const n = kunciWaktu(r, g);
+    if (n === null) continue;
+    per.set(n, (per.get(n) ?? 0) + nilaiBaris(r));
+  }
+  return per;
+}
+
+/** Titik sumbu dari awal sampai akhir data; periode kosong di antaranya diisi 0 supaya jarak sumbu tidak menipu. */
+function rentang(ada: number[], g: Granul): number[] {
+  if (!ada.length) return [];
+  const langkah = g === 'HARI' ? HARI_MS : 1;
+  const awal = g === 'BULAN' ? 1 : Math.min(...ada), akhir = Math.max(...ada);
+  const n = Math.round((akhir - awal) / langkah) + 1;
+  // Tanggal salah ketik (mis. beda tahun) bisa membuat rentang membengkak — pakai titik yang ada saja.
+  if (n > 400) return [...new Set(ada)].sort((x, y) => x - y);
+  return Array.from({ length: n }, (_, i) => awal + i * langkah);
+}
+
+function deretWaktu(rows: BarisLaporan[], g: Granul): { label: string; Nilai: number }[] {
+  const per = petaWaktu(rows, g);
+  return rentang([...per.keys()], g).map((n) => ({ label: labelWaktu(n, g), Nilai: per.get(n) ?? 0 }));
+}
+
+/** Dua seri (masuk & keluar) pada sumbu waktu yang sama. */
+function deretGabung(masuk: BarisLaporan[], keluar: BarisLaporan[], g: Granul) {
+  const a = petaWaktu(masuk, g), b = petaWaktu(keluar, g);
+  return rentang([...a.keys(), ...b.keys()], g).map((n) => ({
+    label: labelWaktu(n, g),
+    'Barang Masuk': a.get(n) ?? 0,
+    'Barang Keluar': b.get(n) ?? 0,
+  }));
 }
 
 const tingkat = (p: number, target: number): 'baik' | 'waspada' | 'rendah' => (p >= target * 0.9 ? 'baik' : p >= target * 0.75 ? 'waspada' : 'rendah');
@@ -145,6 +227,29 @@ const LR_CSS = `
 .lr-poin{display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;align-items:center;padding:.65rem .8rem;border-radius:14px;background:var(--wr-tab-bg);border:1px solid var(--wr-line)}
 .lr-poin-i{width:30px;height:30px;border-radius:9px;display:grid;place-items:center}
 .lr-poin p{margin:0;font-size:.8rem;line-height:1.45;color:var(--txt-primary)}
+.lr-seg{display:inline-flex;border-radius:10px;overflow:hidden;border:1px solid var(--wr-field-border)}
+.lr-seg button{font:inherit;font-size:.74rem;font-weight:700;padding:.42rem .8rem;cursor:pointer;border:0;background:var(--wr-field-bg);color:var(--wr-txt-muted)}
+.lr-seg button+button{border-left:1px solid var(--wr-field-border)}
+.lr-seg button:hover{background:var(--wr-btn-bg-hover);color:var(--txt-primary)}
+.lr-seg button[aria-pressed='true']{background:var(--wr-in-bg);color:var(--wr-in-text)}
+.lr-seg button:focus-visible,.lr-chip:focus-visible,.lr-rinci button:focus-visible{outline:2px solid var(--wr-focus,#00D084);outline-offset:2px}
+.lr-chip{display:inline-flex;align-items:center;gap:.4rem;padding:.38rem .8rem;border-radius:99px;font:inherit;font-size:.76rem;font-weight:700;cursor:pointer;
+  background:var(--wr-tab-bg);color:var(--wr-txt-muted);border:1px solid var(--wr-line)}
+.lr-chip:hover{background:var(--wr-btn-bg-hover);color:var(--txt-primary)}
+.lr-chip[aria-pressed='true']{background:var(--wr-in-bg);color:var(--wr-in-text);border-color:var(--wr-in-border)}
+.lr-chip small{font-weight:600;opacity:.75}
+.lr-filter2{display:flex;gap:.45rem;align-items:center;flex-wrap:wrap;margin:-.2rem 0 1rem}
+.lr-filter2>span{font-size:.72rem;font-weight:700;color:var(--txt-secondary);margin-right:.2rem}
+.lr-rinci{width:100%;border-collapse:collapse;font-size:.78rem}
+.lr-rinci th{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--wr-txt-muted);text-align:right;padding:.45rem .5rem;border-bottom:1px solid var(--wr-line)}
+.lr-rinci th:first-child,.lr-rinci td:first-child{text-align:left}
+.lr-rinci td{padding:.5rem;text-align:right;border-bottom:1px solid var(--wr-line);font-variant-numeric:tabular-nums;color:var(--txt-primary)}
+.lr-rinci tr:last-child td{border-bottom:0}
+.lr-rinci button{font:inherit;font-weight:800;font-size:.78rem;background:none;border:0;padding:0;cursor:pointer;color:var(--txt-primary);text-align:left}
+.lr-rinci button:hover{text-decoration:underline}
+.lr-rinci small{display:block;font-weight:500;font-size:.68rem;color:var(--wr-txt-muted)}
+.lr-rinci tr[data-aktif='true'] td{background:var(--wr-tab-bg)}
+.lr-scroll{overflow-x:auto}
 .lr-note{display:flex;gap:.5rem;align-items:flex-start;font-size:.72rem;color:var(--wr-txt-muted);margin:0 0 1rem}
 @keyframes lr-spin{to{transform:rotate(360deg)}}
 .lr-spin{animation:lr-spin .9s linear infinite}
@@ -166,9 +271,11 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
   const [tahun, setTahun] = useState(new Date().getFullYear());
   const [site, setSite] = useState<string>(siteTerkunci ? auth.assignedSite : 'global');
   const siteAktif = siteTerkunci ? auth.assignedSite : site;
+  const [pilihanKey, setPilihanKey] = useState('ALL');
+  const [kat, setKat] = useState<FilterKat>('ALL');
 
-  const [masuk, setMasuk] = useState<BarisLaporan[]>([]);
-  const [keluar, setKeluar] = useState<BarisLaporan[]>([]);
+  const [masukAll, setMasuk] = useState<BarisLaporan[]>([]);
+  const [keluarAll, setKeluar] = useState<BarisLaporan[]>([]);
   const [os, setOs] = useState<OsData | null>(null);
   const [ms, setMs] = useState<MsData | null>(null);
   const [memuat, setMemuat] = useState(true);
@@ -192,30 +299,73 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
     return () => { batal = true; };
   }, [siteAktif, tahun]);
 
+  // ── Filter berlapis ──
+  // K = hanya kode · P = hanya periode · (tanpa akhiran) = kode + periode → dipakai semua angka & grafik.
+  const pilihan = useMemo(() => parsePilihan(pilihanKey), [pilihanKey]);
+  const masukK = useMemo(() => (kat === 'ALL' ? masukAll : masukAll.filter((r) => kategoriKode(r.kode) === kat)), [masukAll, kat]);
+  const keluarK = useMemo(() => (kat === 'ALL' ? keluarAll : keluarAll.filter((r) => kategoriKode(r.kode) === kat)), [keluarAll, kat]);
+  const masukP = useMemo(() => masukAll.filter((r) => lolosPilihan(r, pilihan)), [masukAll, pilihan]);
+  const keluarP = useMemo(() => keluarAll.filter((r) => lolosPilihan(r, pilihan)), [keluarAll, pilihan]);
+  const masuk = useMemo(() => masukK.filter((r) => lolosPilihan(r, pilihan)), [masukK, pilihan]);
+  const keluar = useMemo(() => keluarK.filter((r) => lolosPilihan(r, pilihan)), [keluarK, pilihan]);
+
+  // Satu minggu → grafik per hari; satu bulan → per minggu; semua → kartu per minggu, perbandingan per bulan.
+  const granulKartu: Granul = pilihan.jenis === 'W' ? 'HARI' : 'MINGGU';
+  const granulBanding: Granul = pilihan.jenis === 'W' ? 'HARI' : pilihan.jenis === 'B' ? 'MINGGU' : 'BULAN';
+  const labelPeriode = pilihan.jenis === 'W' ? `W${pilihan.n} ${tahun}`
+    : pilihan.jenis === 'B' ? `${NAMA_BULAN_PENUH[pilihan.n - 1] ?? `bulan ${pilihan.n}`} ${tahun}` : String(tahun);
+
+  // Isi dropdown: tiap minggu / bulan yang ada datanya, lengkap dengan total masuk & keluar (ikut filter kode).
+  const opsi = useMemo(() => {
+    const susun = (kunci: (r: BarisLaporan) => number) => {
+      const per = new Map<number, { masuk: number; keluar: number }>();
+      const tambah = (rows: BarisLaporan[], arah: 'masuk' | 'keluar') => {
+        for (const r of rows) {
+          const n = Number(kunci(r));
+          if (!Number.isFinite(n) || n < 1) continue;
+          const c = per.get(n) ?? { masuk: 0, keluar: 0 };
+          c[arah] += nilaiBaris(r); per.set(n, c);
+        }
+      };
+      tambah(masukK, 'masuk'); tambah(keluarK, 'keluar');
+      return [...per.entries()].sort((x, y) => x[0] - y[0]).map(([n, v]) => ({ n, ...v }));
+    };
+    return { minggu: susun((r) => r.minggu), bulan: susun((r) => r.bulan) };
+  }, [masukK, keluarK]);
+
+  // Rincian per kategori — ikut periode, tetapi selalu memperlihatkan RDA/RCE/RET sekaligus.
+  const perKat = useMemo(() => KAT_KODE.map((c) => {
+    const im = masukP.filter((r) => kategoriKode(r.kode) === c.key);
+    const ik = keluarP.filter((r) => kategoriKode(r.kode) === c.key);
+    return { ...c, masuk: jumlah(im), keluar: jumlah(ik), barisMasuk: im.length, barisKeluar: ik.length };
+  }), [masukP, keluarP]);
+  // Baris di luar RDA/RCE/RET (terutama kode aset berawalan angka) — hanya dihitung pada pilihan "Semua".
+  const luarKat = useMemo(() => {
+    const im = masukP.filter((r) => kategoriKode(r.kode) === null);
+    const ik = keluarP.filter((r) => kategoriKode(r.kode) === null);
+    return { masuk: jumlah(im), keluar: jumlah(ik), baris: im.length + ik.length };
+  }, [masukP, keluarP]);
+
   // ── Barang masuk ──
   const m = useMemo(() => {
     const total = masuk.reduce((t, r) => t + (Number(r.totalHarga) || 0), 0);
     const vendor = new Map<string, number>();
     for (const r of masuk) { const v = (r.alokasi || '').trim() || 'Tanpa Supplier'; vendor.set(v, (vendor.get(v) ?? 0) + (Number(r.totalHarga) || 0)); }
     const urut = [...vendor.entries()].sort((a, b) => b[1] - a[1]);
-    return { total, item: masuk.length, jumlahVendor: vendor.size, top: urut[0], deret: deretMingguan(masuk) };
-  }, [masuk]);
+    return { total, item: masuk.length, jumlahVendor: vendor.size, top: urut[0], deret: deretWaktu(masuk, granulKartu) };
+  }, [masuk, granulKartu]);
 
   // ── Barang keluar ──
   const k = useMemo(() => {
     const total = keluar.reduce((t, r) => t + (Number(r.totalHarga) || 0), 0);
     const per = new Map<string, number>();
     for (const r of keluar) per.set(r.section, (per.get(r.section) ?? 0) + (Number(r.totalHarga) || 0));
-    const kat = Object.keys(SEKSI).map((key) => ({ key, ...SEKSI[key], nilai: per.get(key) ?? 0 })).filter((x) => x.nilai > 0).sort((a, b) => b.nilai - a.nilai);
-    return { total, item: keluar.length, kat, top: kat[0], deret: deretMingguan(keluar) };
-  }, [keluar]);
+    const seksi = Object.keys(SEKSI).map((key) => ({ key, ...SEKSI[key], nilai: per.get(key) ?? 0 })).filter((x) => x.nilai > 0).sort((a, b) => b.nilai - a.nilai);
+    return { total, item: keluar.length, kat: seksi, top: seksi[0], deret: deretWaktu(keluar, granulKartu) };
+  }, [keluar, granulKartu]);
 
-  // ── Perbandingan bulanan masuk vs keluar ──
-  const bulanan = useMemo(() => NAMA_BULAN.map((nama, i) => ({
-    bulan: nama,
-    'Barang Masuk': masuk.filter((r) => r.bulan === i + 1).reduce((t, r) => t + (Number(r.totalHarga) || 0), 0),
-    'Barang Keluar': keluar.filter((r) => r.bulan === i + 1).reduce((t, r) => t + (Number(r.totalHarga) || 0), 0),
-  })), [masuk, keluar]);
+  // ── Perbandingan masuk vs keluar ──
+  const perbandingan = useMemo(() => deretGabung(masuk, keluar, granulBanding), [masuk, keluar, granulBanding]);
 
   // ── Outstanding PR ──
   const pr = useMemo(() => {
@@ -260,13 +410,13 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
   const poin = useMemo(() => {
     const p: { id: string; nada: Nada; ikon: React.ElementType; teks: string; mode: LaporanMode }[] = [];
     if (m.top && m.total > 0 && (m.top[1] / m.total) >= 0.4) p.push({ id: 'vendor', nada: NADA.info, ikon: TrendingUp, mode: 'IN',
-      teks: `Vendor “${m.top[0]}” menyumbang ${fmtP((m.top[1] / m.total) * 100, 0)} nilai barang masuk (${rp(m.top[1])}).` });
+      teks: `Vendor “${m.top[0]}” menyumbang ${fmtP((m.top[1] / m.total) * 100, 0)} nilai barang masuk${kat === 'ALL' ? '' : ` kode ${NAMA_KAT[kat]}`} (${rp(m.top[1])}).` });
     if (k.top && k.total > 0) p.push({ id: 'kat', nada: NADA.info, ikon: TrendingDown, mode: 'OUT',
       teks: `Biaya barang keluar terbesar ada di ${k.top.nama}: ${rp(k.top.nilai)} (${fmtP((k.top.nilai / k.total) * 100, 0)} dari total).` });
     if (m.total > 0 || k.total > 0) {
       const selisih = m.total - k.total;
       p.push({ id: 'selisih', nada: selisih >= 0 ? NADA.in : NADA.warn, ikon: Scale, mode: selisih >= 0 ? 'IN' : 'OUT',
-        teks: selisih >= 0 ? `Nilai barang masuk ${rp(selisih)} lebih besar dari barang keluar pada ${tahun}.` : `Nilai barang keluar ${rp(-selisih)} lebih besar dari barang masuk pada ${tahun}.` });
+        teks: selisih >= 0 ? `Nilai barang masuk ${rp(selisih)} lebih besar dari barang keluar pada ${labelPeriode}${kat === 'ALL' ? '' : ` (kode ${NAMA_KAT[kat]})`}.` : `Nilai barang keluar ${rp(-selisih)} lebih besar dari barang masuk pada ${labelPeriode}${kat === 'ALL' ? '' : ` (kode ${NAMA_KAT[kat]})`}.` });
     }
     if (pr && pr.total > 0) p.push({ id: 'pr', nada: pr.persenPending >= 50 ? NADA.warn : NADA.info, ikon: FileText, mode: 'OS_PR',
       teks: `${angka(pr.total)} PR belum selesai; ${fmtP(pr.persenPending, 0)} masih menunggu approval${pr.siteTop ? `, terbanyak di ${pr.siteTop.label}` : ''}.` });
@@ -274,10 +424,11 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
       teks: ss.dibawahTarget > 0 ? `Safety stock ${fmtP(ss.pct)} dari target ${ss.target}%; ${ss.dibawahTarget} lokasi masih di bawah ambang${ss.terendah ? `, terendah ${ss.terendah.nama} (${fmtP(ss.terendah.pct)})` : ''}.`
         : `Safety stock ${fmtP(ss.pct)} dari target ${ss.target}% — seluruh lokasi dalam kondisi baik.` });
     return p;
-  }, [m, k, pr, ss, tahun]);
+  }, [m, k, pr, ss, labelPeriode, kat]);
 
   const sumbu = { fontSize: 11, fill: W['--wr-txt-muted'] };
   const labelLingkup = siteAktif === 'global' ? 'seluruh site' : labelSiteDariKey(siteAktif);
+  const tagKat = kat === 'ALL' ? '' : ` · kode ${NAMA_KAT[kat]}`;
 
   return (
     <>
@@ -286,7 +437,7 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
       <div className="lr-filter">
         {!siteTerkunci && (
           <label>Site
-            <select className="wr-ctl" style={{ padding: '.45rem .7rem', borderRadius: 10 }} value={site} onChange={(e) => setSite(e.target.value)}>
+            <select className="wr-ctl" style={{ padding: '.45rem .7rem', borderRadius: 10 }} value={site} onChange={(e) => { setSite(e.target.value); setPilihanKey('ALL'); }}>
               <option value="global">Semua Site</option>
               {sites.map((s) => <option key={s.key} value={s.key}>{labelPenuh(s.label)}</option>)}
             </select>
@@ -294,12 +445,32 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
         )}
         <label>Tahun
           <input type="number" className="wr-ctl" style={{ width: 90, padding: '.45rem .7rem', borderRadius: 10 }} min={2020} max={2100} value={tahun}
-            onChange={(e) => setTahun(Number(e.target.value) || new Date().getFullYear())} />
+            onChange={(e) => { setTahun(Number(e.target.value) || new Date().getFullYear()); setPilihanKey('ALL'); }} />
+        </label>
+        <label>Periode
+          <select className="wr-ctl" style={{ padding: '.45rem .7rem', borderRadius: 10, maxWidth: 'min(420px, 100%)' }} value={pilihanKey} onChange={(e) => setPilihanKey(e.target.value)}>
+            <option value="ALL">Semua periode</option>
+            <optgroup label="Per Minggu">
+              {opsi.minggu.map((o) => <option key={`W${o.n}`} value={`W:${o.n}`}>{`W${o.n} · Masuk ${rupiahRingkas(o.masuk)} · Keluar ${rupiahRingkas(o.keluar)}`}</option>)}
+            </optgroup>
+            <optgroup label="Per Bulan">
+              {opsi.bulan.map((o) => <option key={`B${o.n}`} value={`B:${o.n}`}>{`${NAMA_BULAN_PENUH[o.n - 1] ?? `Bulan ${o.n}`} · Masuk ${rupiahRingkas(o.masuk)} · Keluar ${rupiahRingkas(o.keluar)}`}</option>)}
+            </optgroup>
+          </select>
         </label>
         {memuat && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', fontSize: '.74rem', color: 'var(--wr-txt-muted)' }}><Loader2 size={14} className="lr-spin" aria-hidden="true" /> Memuat…</span>}
       </div>
+      <div className="lr-filter2" role="group" aria-label="Kategori kode barang">
+        <span>Kode</span>
+        <button type="button" className="lr-chip" aria-pressed={kat === 'ALL'} onClick={() => setKat('ALL')}>Semua <small>{angka(masukP.length + keluarP.length)}</small></button>
+        {perKat.map((c) => (
+          <button key={c.key} type="button" className="lr-chip" title={c.ket} aria-pressed={kat === c.key} onClick={() => setKat(kat === c.key ? 'ALL' : c.key)}>
+            {c.nama} <small>{angka(c.barisMasuk + c.barisKeluar)}</small>
+          </button>
+        ))}
+      </div>
       <p className="lr-note"><Info size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
-        Barang Masuk &amp; Barang Keluar mengikuti filter site dan tahun ({labelLingkup}, {tahun}). Outstanding PR dan Safety Stock mencakup seluruh perusahaan.</p>
+        Barang Masuk &amp; Barang Keluar mengikuti filter site, tahun, periode, dan kode ({labelLingkup}, {labelPeriode}{kat !== 'ALL' ? `, kode ${NAMA_KAT[kat]}` : ''}). Outstanding PR dan Safety Stock mencakup seluruh perusahaan dan <b>tidak</b> ikut filter periode maupun kode.</p>
 
       {gagal.length > 0 && (
         <div className="glass-panel" style={{ borderRadius: 14, padding: '.7rem 1rem', marginBottom: '1rem', fontSize: '.78rem', color: NADA.neg.teks }}>
@@ -319,18 +490,18 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
 
       {/* ── Empat kartu ringkasan ── */}
       <div className="lr-grid" style={{ marginTop: '1rem' }}>
-        <Kartu ikon={TrendingUp} nada={NADA.out} judul="Barang Masuk" sub={`Nilai penerimaan per minggu · ${tahun}`} onDetail={() => onBuka('IN')}>
+        <Kartu ikon={TrendingUp} nada={NADA.out} judul="Barang Masuk" sub={`Nilai penerimaan per ${namaGranul(granulKartu)} · ${labelPeriode}${tagKat}`} onDetail={() => onBuka('IN')}>
           <div className="lr-utama"><b>{rp(m.total)}</b><span>{angka(m.item)} baris penerimaan</span></div>
-          <Garis data={m.deret.map((d) => ({ label: d.minggu, Nilai: d.Nilai }))} kunci="Nilai" warna={W['--wr-out']} />
+          <Garis data={m.deret} kunci="Nilai" warna={W['--wr-out']} />
           <div className="lr-fakta-wrap">
             <Fakta label="Vendor terbesar" nilai={m.top ? `${m.top[0]} · ${rp(m.top[1])}` : '–'} />
             <Fakta label="Jumlah vendor" nilai={angka(m.jumlahVendor)} />
           </div>
         </Kartu>
 
-        <Kartu ikon={TrendingDown} nada={NADA.warn} judul="Barang Keluar" sub={`Biaya per minggu · ${tahun}`} onDetail={() => onBuka('OUT')}>
+        <Kartu ikon={TrendingDown} nada={NADA.warn} judul="Barang Keluar" sub={`Biaya per ${namaGranul(granulKartu)} · ${labelPeriode}${tagKat}`} onDetail={() => onBuka('OUT')}>
           <div className="lr-utama"><b>{rp(k.total)}</b><span>{angka(k.item)} baris pengeluaran</span></div>
-          <Garis data={k.deret.map((d) => ({ label: d.minggu, Nilai: d.Nilai }))} kunci="Nilai" warna={W['--wr-warn']} />
+          <Garis data={k.deret} kunci="Nilai" warna={W['--wr-warn']} />
           {k.kat.length > 0 && (
             <>
               <div className="lr-stack" role="img" aria-label="Komposisi biaya per kategori">
@@ -376,23 +547,54 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
         </Kartu>
       </div>
 
-      {/* ── Perbandingan bulanan ── */}
-      <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label="Perbandingan barang masuk dan keluar per bulan">
-        <h3 className="lr-judul">Barang Masuk vs Barang Keluar per Bulan</h3>
-        <p className="lr-sub" style={{ margin: '.2rem 0 .7rem' }}>Dua garis saja: biru = nilai barang masuk, kuning = nilai barang keluar. Jika garis kuning di atas biru, pengeluaran melampaui penerimaan di bulan itu.</p>
-        <div style={{ height: 270 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={bulanan} margin={{ top: 8, right: 14, left: 4, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} vertical={false} />
-              <XAxis dataKey="bulan" tick={sumbu} axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={tickRupiah} tick={sumbu} axisLine={false} tickLine={false} width={52} />
-              <Tooltip {...tooltipProps} formatter={fmtTooltip} cursor={{ stroke: W['--wr-cursor'] }} />
-              <Legend wrapperStyle={{ fontSize: '.72rem' }} formatter={fmtLegend} />
-              <Line type="monotone" dataKey="Barang Masuk" stroke={W['--wr-out']} strokeWidth={2.6} dot={{ r: 3.5, strokeWidth: 2 }} activeDot={{ r: 6 }} />
-              <Line type="monotone" dataKey="Barang Keluar" stroke={W['--wr-warn']} strokeWidth={2.6} dot={{ r: 3.5, strokeWidth: 2 }} activeDot={{ r: 6 }} />
-            </LineChart>
-          </ResponsiveContainer>
+      {/* ── Perbandingan masuk vs keluar ── */}
+      <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label={`Perbandingan barang masuk dan keluar per ${namaGranul(granulBanding)}`}>
+        <h3 className="lr-judul">Barang Masuk vs Barang Keluar per {namaGranul(granulBanding)} · {labelPeriode}{tagKat}</h3>
+        <p className="lr-sub" style={{ margin: '.2rem 0 .7rem' }}>Dua garis saja: biru = nilai barang masuk, kuning = nilai barang keluar. Jika garis kuning di atas biru, pengeluaran melampaui penerimaan pada {namaGranul(granulBanding)} itu.</p>
+        {perbandingan.length < 2 ? <div className="lr-nodata" style={{ height: 270 }}>Data belum cukup untuk grafik.</div> : (
+          <div style={{ height: 270 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={perbandingan} margin={{ top: 8, right: 14, left: 4, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} vertical={false} />
+                <XAxis dataKey="label" tick={sumbu} axisLine={false} tickLine={false} interval={granulBanding === 'MINGGU' ? 'preserveStartEnd' : 0} minTickGap={granulBanding === 'MINGGU' ? 14 : 0} />
+                <YAxis tickFormatter={tickRupiah} tick={sumbu} axisLine={false} tickLine={false} width={52} />
+                <Tooltip {...tooltipProps} formatter={fmtTooltip} cursor={{ stroke: W['--wr-cursor'] }} />
+                <Legend wrapperStyle={{ fontSize: '.72rem' }} formatter={fmtLegend} />
+                <Line type="monotone" dataKey="Barang Masuk" stroke={W['--wr-out']} strokeWidth={2.6} dot={granulBanding !== 'MINGGU' ? { r: 3.5, strokeWidth: 2 } : false} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="Barang Keluar" stroke={W['--wr-warn']} strokeWidth={2.6} dot={granulBanding !== 'MINGGU' ? { r: 3.5, strokeWidth: 2 } : false} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </section>
+
+      {/* ── Rincian per kategori kode ── */}
+      <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label="Rincian nilai per kategori kode">
+        <h3 className="lr-judul">Rincian per Kategori Kode · {labelPeriode}</h3>
+        <p className="lr-sub" style={{ margin: '.2rem 0 .6rem' }}>Klik kode untuk memfilter seluruh halaman. Angka di tabel ini mengikuti periode yang dipilih dan selalu menampilkan RDA, RCE, dan RET sekaligus.</p>
+        <div className="lr-scroll">
+          <table className="lr-rinci">
+            <thead><tr><th>Kode</th><th>Barang Masuk</th><th>Barang Keluar</th><th>Selisih</th><th>Baris</th></tr></thead>
+            <tbody>
+              {perKat.map((c) => {
+                const selisih = c.masuk - c.keluar;
+                return (
+                  <tr key={c.key} data-aktif={kat === c.key}>
+                    <td><button type="button" onClick={() => setKat(kat === c.key ? 'ALL' : c.key)} aria-pressed={kat === c.key}>{c.nama}<small>{c.ket}</small></button></td>
+                    <td>{rp(c.masuk)}</td>
+                    <td>{rp(c.keluar)}</td>
+                    <td style={{ color: selisih >= 0 ? NADA.in.teks : NADA.warn.teks, fontWeight: 700 }}>{selisih >= 0 ? '+' : '−'}{rp(Math.abs(selisih))}</td>
+                    <td>{angka(c.barisMasuk)} / {angka(c.barisKeluar)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+        <p className="lr-sub" style={{ margin: '.55rem 0 0' }}>
+          Kolom Baris = jumlah baris masuk / keluar.
+          {luarKat.baris > 0 && <> Baris berkode angka (kode aset) tidak termasuk RDA/RCE/RET: {angka(luarKat.baris)} baris, masuk {rp(luarKat.masuk)} · keluar {rp(luarKat.keluar)} — hanya ikut terhitung pada pilihan “Semua”.</>}
+        </p>
       </section>
 
       {/* ── Poin penting ── */}
