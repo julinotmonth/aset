@@ -43,7 +43,7 @@ import { OutstandingPrView } from './OutstandingPrView';
 type Section = 'MAINT' | 'OH' | 'OLI' | 'LAIN' | 'ISOTANK';
 
 interface WeeklyRow {
-  id: string; site: string; direction: 'IN' | 'OUT' | 'ASET'; sourceTab: string;
+  id: string; site: string; direction: 'IN' | 'OUT' | 'ASET'; sourceTab: string; entitas?: string;
   tanggal: string | null; minggu: number; bulan: number; tahun: number;
   kode: string; namaBarang: string; jumlah: number; satuan: string;
   alokasi: string; detailAlokasi: string; pic: string;
@@ -175,6 +175,26 @@ function kunciBarisPivot(r: WeeklyRow): string {
   if (!SITE_KELOMPOK_KEGIATAN.has(r.site)) return r.alokasi;
   return r.detailAlokasi.trim() || '(Tanpa Detail Alokasi)';
 }
+// ── Entitas pemilik transaksi: RDA / RCE / RET ────────────────────────────
+// Satu site bisa memakai beberapa entitas (PT) sekaligus, masing-masing punya
+// tab Google Sheet sendiri (mis. "Barang Keluar - RDA SETU" dan "Barang Keluar -
+// RCE SETU"). Dulu semua baris digabung ke satu pivot per Alokasi, sehingga
+// pemakaian part RDA dan RCE tercampur. Sekarang tiap entitas ditampilkan
+// terpisah, dengan pivot & detail alokasinya sendiri.
+type Entitas = 'RDA' | 'RCE' | 'RET' | 'UMUM';
+const LABEL_ENTITAS: Record<Entitas, string> = { RDA: 'Mother Station', RCE: 'Workshop', RET: 'RET', UMUM: 'Umum (tanpa entitas)' };
+const URUT_ENTITAS: Entitas[] = ['RDA', 'RCE', 'RET', 'UMUM'];
+
+/** Entitas dibaca dari nama tab sumber. Pola KHT "Out (1)"/"In (1)" = tab kedua = RCE. */
+function entitasDariTab(sourceTab: string): Entitas {
+  const t = sourceTab || '';
+  if (/\bRDA\b/i.test(t)) return 'RDA';
+  if (/\bRCE\b/i.test(t)) return 'RCE';
+  if (/\bRET\b/i.test(t)) return 'RET';
+  if (/\(1\)/.test(t)) return 'RCE';
+  return 'UMUM';
+}
+
 /** Formatter tooltip recharts — nilainya bertipe longgar, jadi dinormalkan dulu. */
 const fmtTooltip = (v: unknown) => rupiahPenuh(Number(v) || 0);
 
@@ -305,7 +325,18 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   const minStockAktif = mode === 'MIN_STOCK';
   const osPrAktif = mode === 'OS_PR';
 
-  const [rows, setRows] = useState<WeeklyRow[]>([]);
+  const [rowsSemua, setRows] = useState<WeeklyRow[]>([]);
+  const [entitasPilih, setEntitasPilih] = useState<Entitas | ''>('');
+  // Entitas yang benar-benar ada di data (urut RDA, RCE, RET, Umum) — hanya
+  // untuk Barang Keluar/Masuk; daftar aset tidak dipisah per entitas.
+  const entitasTersedia = useMemo(() => {
+    const ada = new Set(rowsSemua.map((r) => entitasDariTab(r.sourceTab)));
+    return URUT_ENTITAS.filter((e) => ada.has(e));
+  }, [rowsSemua]);
+  const entitas: Entitas | '' = entitasTersedia.includes(entitasPilih as Entitas) ? (entitasPilih as Entitas) : (entitasTersedia[0] ?? '');
+  const rows = useMemo(
+    () => (arah === 'ASET' ? rowsSemua : rowsSemua.filter((r) => entitasDariTab(r.sourceTab) === entitas)),
+    [rowsSemua, arah, entitas]);
   // Penerimaan setahun penuh (tanpa filter bulan) untuk ranking vendor per bulan.
   // Super Admin/user global = seluruh site (PT Reethau Dharma Andalan); user
   // yang terkunci di satu site hanya melihat site-nya sendiri.
@@ -396,7 +427,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
 
     const kelompokKegiatan = rows.length > 0 && SITE_KELOMPOK_KEGIATAN.has(rows[0].site);
     const p: Record<Section, Record<string, Record<number, number>>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {}, ISOTANK: {} };
-    if (!kelompokKegiatan) {
+    if (!kelompokKegiatan && entitas !== 'RCE') {
       for (const s of SECTIONS) for (const a of BARIS_UNIVERSAL[s.key]) p[s.key][a] = {};
     }
     for (const r of rows) {
@@ -415,7 +446,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       }
     }
     return { mingguList: minggus, pivot: p, totalSeksi: ts, grandTotal: gt, kelompokKegiatan };
-  }, [rows]);
+  }, [rows, entitas]);
 
   const totalKeseluruhan = useMemo(
     () => Object.values(grandTotal).reduce((a, b) => a + b, 0), [grandTotal]);
@@ -428,10 +459,14 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   // tak pernah punya Part Maintenance/OH/Consumption OLI (lihat
   // SITE_HANYA_LAIN_ISOTANK), ketiganya disembunyikan supaya tidak muncul
   // kartu/tabel kosong yang tidak relevan dengan laporan asli site itu.
-  const sectionsAktif = useMemo(
-    () => (SITE_HANYA_LAIN_ISOTANK.has(site) ? SECTIONS.filter((s) => s.key === 'LAIN' || s.key === 'ISOTANK') : SECTIONS),
-    [site]
-  );
+  const sectionsAktif = useMemo(() => {
+    // ISO Tank hanya untuk LNG (Sangkulirang); site lain tidak menampilkannya.
+    if (SITE_HANYA_LAIN_ISOTANK.has(site)) return SECTIONS.filter((s) => s.key === 'LAIN' || s.key === 'ISOTANK');
+    const tanpaIso = SECTIONS.filter((s) => s.key !== 'ISOTANK');
+    // Workshop (RCE): tampilkan hanya seksi yang punya baris alokasi nyata.
+    if (entitas === 'RCE') return tanpaIso.filter((s) => Object.keys(pivot[s.key]).length > 0);
+    return tanpaIso;
+  }, [site, entitas, pivot]);
 
   // Data grafik mode KELUAR: batang bertumpuk per minggu + pie komposisi seksi.
   // Satu garis: total biaya semua kategori per minggu (rincian per kategori ada di kartu & donat).
@@ -763,7 +798,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     const baris: string[][] = [];
     if (arah === 'OUT') {
       baris.push(['Seksi', 'Alokasi', ...mingguList.map((m) => `Minggu ${m}`), 'Total']);
-      for (const s of SECTIONS) {
+      for (const s of sectionsAktif) {
         for (const alokasi of urutkanBarisSeksi(s.key, Object.keys(pivot[s.key]))) {
           const data = pivot[s.key][alokasi];
           baris.push([s.judul, alokasi, ...mingguList.map((m) => String(data[m] ?? 0)),
@@ -784,7 +819,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `REPORT_${arah === 'OUT' ? 'KELUAR' : 'MASUK'}_${bulan ? NAMA_BULAN[bulan - 1].toUpperCase() : tahun}_MS_${site.toUpperCase()}.csv`;
+    a.download = `REPORT_${arah === 'OUT' ? 'KELUAR' : 'MASUK'}${arah !== 'ASET' && entitas && entitasTersedia.length > 1 ? `_${entitas}` : ''}_${bulan ? NAMA_BULAN[bulan - 1].toUpperCase() : tahun}_MS_${site.toUpperCase()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -970,6 +1005,13 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       {/* ══════════════════ MODE: BARANG KELUAR ══════════════════ */}
       {!memuat && !kosong && arah === 'OUT' && (
         <>
+          {entitasTersedia.length > 1 && (
+            <div style={{ marginBottom: '.85rem' }}>
+              <Segmen label="Entitas" nilai={entitas as Entitas}
+                opsi={entitasTersedia.map((e) => ({ id: e, label: LABEL_ENTITAS[e] }))}
+                onUbah={setEntitasPilih} />
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             {sectionsAktif.map((s) => (
               <KartuKpi key={s.key} ikon={Package} nada={s} label={LABEL_SEKSI[s.key]}
@@ -1078,7 +1120,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
             pemakaian OLI <strong style={{ color: NADA.warn.teks }}>{rupiahPenuh(totalPerSeksi.OLI)}</strong>;
             biaya Lain-Lain <strong style={{ color: NADA.aset.teks }}>{rupiahPenuh(totalPerSeksi.LAIN)}</strong>
             {totalPerSeksi.ISOTANK > 0 && <>; biaya ISO Tank <strong style={{ color: NADA.info.teks }}>{rupiahPenuh(totalPerSeksi.ISOTANK)}</strong></>}.
-            Grand Total <strong style={{ color: NADA.in.teks }}>{rupiahPenuh(totalKeseluruhan)}</strong> dari {rows.length} baris transaksi keluar.
+            Grand Total <strong style={{ color: NADA.in.teks }}>{rupiahPenuh(totalKeseluruhan)}</strong> dari {rows.length} baris transaksi keluar{entitas && entitasTersedia.length > 1 ? ` (${LABEL_ENTITAS[entitas]})` : ''}.
           </div>
         </>
       )}
@@ -1086,6 +1128,13 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       {/* ══════════════════ MODE: BARANG MASUK ══════════════════ */}
       {!memuat && !kosong && arah === 'IN' && (
         <>
+          {entitasTersedia.length > 1 && (
+            <div style={{ marginBottom: '.85rem' }}>
+              <Segmen label="Entitas" nilai={entitas as Entitas}
+                opsi={entitasTersedia.map((e) => ({ id: e, label: LABEL_ENTITAS[e] }))}
+                onUbah={setEntitasPilih} />
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             <KartuKpi ikon={TrendingUp} nada={NADA.in} label="Nilai Penerimaan" nilai={rupiahPenuh(masuk.nilai)}
               sub={`${labelPenuh(labelSite)}${bulan ? ` · ${NAMA_BULAN[bulan - 1]}` : ''} ${tahun}`} />
