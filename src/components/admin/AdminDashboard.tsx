@@ -460,6 +460,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           onNavigateLaporan={(m) => { setLaporanMode(m); setActiveView('weekly-report'); }}
           asetTab={asetTab}
           onNavigateAset={(t) => { setAsetTab(t); setActiveView('asset-registry'); }}
+          onOpenSearch={() => setIsPaletteOpen(true)}
           isOpen={isMobileNavOpen}
           onClose={() => setIsMobileNavOpen(false)}
           showUserManagement={isSuperAdmin}
