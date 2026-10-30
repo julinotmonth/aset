@@ -13,9 +13,9 @@
 //                   punya kategori sendiri di sini (tetap ikut terhitung pada pilihan "Semua")
 //   • Outstanding PR        → /outstanding-pr   (seluruh perusahaan)
 //   • Safety Stock          → /min-stock        (seluruh perusahaan)
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  TrendingUp, TrendingDown, FileText, PackageCheck, ArrowRight, Loader2, Lightbulb, Info, Wallet, Scale,
+  TrendingUp, TrendingDown, FileText, PackageCheck, ArrowRight, Loader2, Lightbulb, Info, Wallet, Scale, ChevronRight, X,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend,
@@ -44,7 +44,7 @@ const tickRupiah = (n: number) => {
 const NAMA_BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 // ── Tipe payload (subset yang dipakai) ───────────────────────────────────
-interface BarisLaporan { minggu: number; bulan: number; totalHarga: number; alokasi: string; section: string; kode: string; tanggal: string | null }
+interface BarisLaporan { minggu: number; bulan: number; totalHarga: number; alokasi: string; section: string; kode: string; tanggal: string | null; site: string; namaBarang: string; id: string; jumlah: number; satuan: string }
 interface OsData {
   grand: { pending: number; released: number; total: number };
   sites: { key: string; label: string; totals: { total: number } }[];
@@ -94,6 +94,63 @@ function parsePilihan(v: string): Pilihan {
 }
 const lolosPilihan = (r: BarisLaporan, p: Pilihan) =>
   p.jenis === 'ALL' || (p.jenis === 'W' ? Number(r.minggu) === p.n : Number(r.bulan) === p.n);
+
+// ── Asal nilai Barang Masuk: untuk apa barang/jasa itu dibeli ─────────────
+// Aturan dibaca dari KODE barang (kolom "Kode" di sheet), urutannya penting:
+//   1. berawalan angka (mis. 01.11-2026-0033) → Aset
+//   2. berawalan SVC                          → Jasa
+//   3. berawalan I-RDA / I-RCE / I-RET        → Spare Part
+//   4. kode kosong/lain tetapi nama barang berawalan "Jasa" → Jasa
+//   5. selain itu (mis. HSE, kode lain, atau tanpa kode) → Others; contoh awalan kodenya ditampilkan agar aturan bisa dilengkapi
+type Peruntukan = 'SPARE' | 'JASA' | 'ASET' | 'OTHERS';
+const PERUNTUKAN: { key: Peruntukan; nama: string; ket: string; warna: string }[] = [
+  { key: 'SPARE', nama: 'Spare Part', ket: 'Kode berawalan I-RDA / I-RCE / I-RET', warna: 'var(--wr-pie-in)' },
+  { key: 'JASA', nama: 'Jasa', ket: 'Kode berawalan SVC, atau nama barang berawalan “Jasa”', warna: 'var(--wr-pie-warn)' },
+  { key: 'ASET', nama: 'Aset', ket: 'Kode berawalan angka (kode aset)', warna: 'var(--wr-pie-aset)' },
+  { key: 'OTHERS', nama: 'Others', ket: 'Kode lain (mis. HSE) atau tanpa kode', warna: 'var(--wr-pie-neutral)' },
+];
+const POLA_JASA = /^(?:I-?)?SVC(?![A-Z])/;
+function peruntukan(r: BarisLaporan): Peruntukan {
+  const k = normKode(r.kode);
+  if (/^\d/.test(k)) return 'ASET';
+  if (POLA_JASA.test(k)) return 'JASA';
+  if (kategoriKode(r.kode)) return 'SPARE';
+  if (/^\s*jasa\b/i.test(r.namaBarang || '')) return 'JASA';
+  return 'OTHERS';
+}
+
+interface BarisAsal { key: Peruntukan; nama: string; ket: string; warna: string; nilai: number; baris: number; pct: number; sub: string | null }
+interface BarisSiteAsal { key: string; label: string; total: number; pct: number; baris: number; per: Record<Peruntukan, number> }
+interface RincianAsal { total: number; jenis: BarisAsal[]; perSite: BarisSiteAsal[]; contohOthers: string[] }
+
+function rincianAsal(rows: BarisLaporan[]): RincianAsal {
+  const nol = (): Record<Peruntukan, number> => ({ SPARE: 0, JASA: 0, ASET: 0, OTHERS: 0 });
+  const nilai = nol(), baris = nol();
+  const spare: Record<KodeKat, number> = { RDA: 0, RCE: 0, RET: 0 };
+  const site = new Map<string, { total: number; baris: number; per: Record<Peruntukan, number> }>();
+  const belum = new Map<string, number>();
+  let total = 0;
+  for (const r of rows) {
+    const v = Number(r.totalHarga) || 0;
+    const j = peruntukan(r);
+    nilai[j] += v; baris[j] += 1; total += v;
+    if (j === 'SPARE') { const c = kategoriKode(r.kode); if (c) spare[c] += v; }
+    if (j === 'OTHERS') { const awal = normKode(r.kode).split(/[-.]/)[0] || '(kode kosong)'; belum.set(awal, (belum.get(awal) ?? 0) + v); }
+    const kunci = r.site || '-';
+    const c = site.get(kunci) ?? { total: 0, baris: 0, per: nol() };
+    c.total += v; c.baris += 1; c.per[j] += v; site.set(kunci, c);
+  }
+  return {
+    total,
+    jenis: PERUNTUKAN.map((p) => ({
+      ...p, nilai: nilai[p.key], baris: baris[p.key], pct: total > 0 ? (nilai[p.key] / total) * 100 : 0,
+      sub: p.key === 'SPARE' && nilai.SPARE > 0 ? KAT_KODE.map((c) => `${c.nama} ${rupiahRingkas(spare[c.key])}`).join(' · ') : null,
+    })),
+    perSite: [...site.entries()].map(([key, v]) => ({ key, label: key === '-' ? 'Tanpa site' : labelSiteDariKey(key), total: v.total, pct: total > 0 ? (v.total / total) * 100 : 0, baris: v.baris, per: v.per }))
+      .sort((a, b) => b.total - a.total),
+    contohOthers: [...belum.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => k),
+  };
+}
 
 const nilaiBaris = (r: BarisLaporan) => Number(r.totalHarga) || 0;
 const jumlah = (rows: BarisLaporan[]) => rows.reduce((t, r) => t + nilaiBaris(r), 0);
@@ -199,6 +256,142 @@ const Fakta = ({ label, nilai, nada }: { label: string; nilai: string; nada?: Na
   <div className="lr-fakta"><span>{label}</span><b style={nada ? { color: nada.teks } : undefined}>{nilai}</b></div>
 );
 
+// ── Panel rincian: daftar barang pada satu peruntukan ────────────────────
+type ModeRincian = 'ITEM' | 'TRANSAKSI';
+type UrutRincian = 'NILAI' | 'QTY' | 'NAMA' | 'TERBARU';
+interface BarisItem { key: string; kode: string; nama: string; satuan: string; qty: number; nilai: number; baris: number; terakhir: string }
+const HALAMAN = 50;
+const fmtQty = (n: number) => n.toLocaleString('id-ID', { maximumFractionDigits: 2 });
+const fmtTgl = (t: string | null) => (t && t.length >= 10 ? `${Number(t.slice(8, 10))} ${NAMA_BULAN[Number(t.slice(5, 7)) - 1] ?? ''} ${t.slice(0, 4)}` : '–');
+const BANDING_ITEM: Record<UrutRincian, (a: BarisItem, b: BarisItem) => number> = {
+  NILAI: (a, b) => b.nilai - a.nilai, QTY: (a, b) => b.qty - a.qty,
+  NAMA: (a, b) => a.nama.localeCompare(b.nama, 'id'), TERBARU: (a, b) => b.terakhir.localeCompare(a.terakhir),
+};
+const BANDING_TRX: Record<UrutRincian, (a: BarisLaporan, b: BarisLaporan) => number> = {
+  NILAI: (a, b) => (Number(b.totalHarga) || 0) - (Number(a.totalHarga) || 0), QTY: (a, b) => (Number(b.jumlah) || 0) - (Number(a.jumlah) || 0),
+  NAMA: (a, b) => (a.namaBarang || '').localeCompare(b.namaBarang || '', 'id'), TERBARU: (a, b) => (b.tanggal || '').localeCompare(a.tanggal || ''),
+};
+
+/** Daftar barang pada satu peruntukan (Spare Part / Jasa / Aset / Others), per item atau per transaksi, lengkap dengan kuantitas dan nilai. */
+function RincianPeruntukan({ rows, jenis, siteAwal, bisaPilihSite, onTutup }: {
+  rows: BarisLaporan[]; jenis: Peruntukan; siteAwal: string; bisaPilihSite: boolean; onTutup: () => void;
+}) {
+  const { pie } = useWrTema();
+  const meta = PERUNTUKAN.find((p) => p.key === jenis) ?? PERUNTUKAN[0];
+  const [site, setSite] = useState(siteAwal);
+  const [cari, setCari] = useState('');
+  const [mode, setMode] = useState<ModeRincian>('ITEM');
+  const [urut, setUrut] = useState<UrutRincian>('NILAI');
+  const [batas, setBatas] = useState(HALAMAN);
+
+  const sejenis = useMemo(() => rows.filter((r) => peruntukan(r) === jenis), [rows, jenis]);
+  const daftarSite = useMemo(
+    () => [...new Set(sejenis.map((r) => r.site || '-'))].map((k) => ({ key: k, label: k === '-' ? 'Tanpa site' : labelSiteDariKey(k) })).sort((a, b) => a.label.localeCompare(b.label, 'id')),
+    [sejenis],
+  );
+  const cocok = useMemo(() => {
+    const q = cari.trim().toLowerCase();
+    return sejenis.filter((r) => (site === 'ALL' || (r.site || '-') === site) && (!q || `${r.kode} ${r.namaBarang} ${r.alokasi}`.toLowerCase().includes(q)));
+  }, [sejenis, site, cari]);
+
+  // Item = kode + nama + satuan yang sama digabung, supaya kuantitasnya bisa dijumlahkan dengan benar.
+  const item = useMemo(() => {
+    const per = new Map<string, BarisItem>();
+    for (const r of cocok) {
+      const key = `${normKode(r.kode)}|${(r.namaBarang || '').trim().toLowerCase()}|${(r.satuan || '').trim().toLowerCase()}`;
+      const c = per.get(key) ?? { key, kode: (r.kode || '').trim() || '–', nama: (r.namaBarang || '').trim() || '(tanpa nama)', satuan: (r.satuan || '').trim(), qty: 0, nilai: 0, baris: 0, terakhir: '' };
+      c.qty += Number(r.jumlah) || 0; c.nilai += Number(r.totalHarga) || 0; c.baris += 1;
+      if ((r.tanggal || '') > c.terakhir) c.terakhir = r.tanggal || '';
+      per.set(key, c);
+    }
+    return [...per.values()].sort(BANDING_ITEM[urut]);
+  }, [cocok, urut]);
+  const transaksi = useMemo(() => (mode === 'TRANSAKSI' ? [...cocok].sort(BANDING_TRX[urut]) : []), [cocok, urut, mode]);
+
+  const totalNilai = useMemo(() => cocok.reduce((t, r) => t + (Number(r.totalHarga) || 0), 0), [cocok]);
+  // Kuantitas hanya bisa dijumlahkan per satuan (pcs tidak sama dengan liter).
+  const qtyTeks = useMemo(() => {
+    const per = new Map<string, number>();
+    for (const r of cocok) { const u = (r.satuan || '').trim() || 'tanpa satuan'; per.set(u, (per.get(u) ?? 0) + (Number(r.jumlah) || 0)); }
+    const urutan = [...per.entries()].sort((a, b) => b[1] - a[1]);
+    return urutan.slice(0, 4).map(([u, q]) => `${fmtQty(q)} ${u}`).join(' · ') + (urutan.length > 4 ? ` · +${urutan.length - 4} satuan lain` : '');
+  }, [cocok]);
+
+  const total = mode === 'ITEM' ? item.length : transaksi.length;
+  const sisa = Math.max(0, total - batas);
+  const labelSite = site === 'ALL' ? null : site === '-' ? 'Tanpa site' : labelSiteDariKey(site);
+
+  return (
+    <div className="lr-det" role="region" aria-label={`Rincian barang masuk ${meta.nama}`} id="lr-asal-detail">
+      <div className="lr-det-h">
+        <div>
+          <h4><span className="lr-asal-titik" style={{ background: pie(meta.warna) }} aria-hidden="true" />{meta.nama}{labelSite && <span style={{ fontWeight: 600 }}> · {labelSite}</span>}</h4>
+          <p className="lr-sub" style={{ margin: '.3rem 0 0' }}>
+            {angka(item.length)} item · {angka(cocok.length)} transaksi · <b style={{ color: 'var(--txt-primary)' }}>{rp(totalNilai)}</b>{qtyTeks ? ` · Kuantitas: ${qtyTeks}` : ''}
+          </p>
+        </div>
+        <button type="button" className="lr-detail" onClick={onTutup}><X size={14} aria-hidden="true" /> Tutup</button>
+      </div>
+
+      <div className="lr-det-tools">
+        <input type="search" value={cari} placeholder="Cari kode, nama barang, atau vendor…" aria-label="Cari di rincian" onChange={(e) => { setCari(e.target.value); setBatas(HALAMAN); }} />
+        {bisaPilihSite && (
+          <select value={site} aria-label="Filter site pada rincian" onChange={(e) => { setSite(e.target.value); setBatas(HALAMAN); }}>
+            <option value="ALL">Semua site</option>
+            {daftarSite.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+          </select>
+        )}
+        <div className="lr-seg" role="group" aria-label="Bentuk tampilan">
+          <button type="button" aria-pressed={mode === 'ITEM'} onClick={() => { setMode('ITEM'); setBatas(HALAMAN); }}>Per Item</button>
+          <button type="button" aria-pressed={mode === 'TRANSAKSI'} onClick={() => { setMode('TRANSAKSI'); setBatas(HALAMAN); }}>Per Transaksi</button>
+        </div>
+        <select value={urut} aria-label="Urutkan rincian" onChange={(e) => { setUrut(e.target.value as UrutRincian); setBatas(HALAMAN); }}>
+          <option value="NILAI">Nilai terbesar</option>
+          <option value="QTY">Kuantitas terbanyak</option>
+          <option value="NAMA">Nama A–Z</option>
+          <option value="TERBARU">Terbaru</option>
+        </select>
+      </div>
+
+      {total === 0 ? <div className="lr-nodata" style={{ minHeight: 90 }}>Tidak ada data yang cocok dengan pencarian.</div> : (
+        <div className="lr-det-wrap">
+          {mode === 'ITEM' ? (
+            <table className="lr-det-tbl">
+              <thead><tr><th className="l">Kode</th><th className="l">Nama Barang</th><th>Kuantitas</th><th>Nilai</th><th>Transaksi</th><th>Terakhir</th></tr></thead>
+              <tbody>
+                {item.slice(0, batas).map((x) => (
+                  <tr key={x.key}>
+                    <td className="l kode">{x.kode}</td><td className="l">{x.nama}</td>
+                    <td>{fmtQty(x.qty)}{x.satuan ? ` ${x.satuan}` : ''}</td><td className="nilai">{rp(x.nilai)}</td><td>{angka(x.baris)}</td><td>{fmtTgl(x.terakhir || null)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table className="lr-det-tbl">
+              <thead><tr><th className="l">Tanggal</th>{bisaPilihSite && <th className="l">Site</th>}<th className="l">Kode</th><th className="l">Nama Barang</th><th className="l">Vendor</th><th>Kuantitas</th><th>Nilai</th></tr></thead>
+              <tbody>
+                {transaksi.slice(0, batas).map((r, i) => (
+                  <tr key={r.id || i}>
+                    <td className="l">{fmtTgl(r.tanggal)}</td>{bisaPilihSite && <td className="l">{r.site ? labelSiteDariKey(r.site) : '–'}</td>}
+                    <td className="l kode">{(r.kode || '').trim() || '–'}</td><td className="l">{r.namaBarang || '–'}</td><td className="l">{(r.alokasi || '').trim() || '–'}</td>
+                    <td>{fmtQty(Number(r.jumlah) || 0)}{r.satuan ? ` ${r.satuan}` : ''}</td><td className="nilai">{rp(Number(r.totalHarga) || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+      {sisa > 0 && (
+        <button type="button" className="lr-detail" style={{ marginTop: '.6rem' }} onClick={() => setBatas((b) => b + HALAMAN)}>
+          Tampilkan {angka(Math.min(HALAMAN, sisa))} lagi · sisa {angka(sisa)}
+        </button>
+      )}
+    </div>
+  );
+}
+
 const LR_CSS = `
 .lr-filter{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem}
 .lr-filter label{font-size:.72rem;font-weight:700;color:var(--txt-secondary);display:flex;align-items:center;gap:.4rem}
@@ -250,6 +443,39 @@ const LR_CSS = `
 .lr-rinci small{display:block;font-weight:500;font-size:.68rem;color:var(--wr-txt-muted)}
 .lr-rinci tr[data-aktif='true'] td{background:var(--wr-tab-bg)}
 .lr-scroll{overflow-x:auto}
+.lr-asal{display:grid;gap:.5rem}
+.lr-asal-baris{display:grid;grid-template-columns:auto minmax(0,1.3fr) minmax(80px,1fr) auto auto;gap:.8rem;align-items:center;padding:.6rem .8rem;border-radius:12px;background:var(--wr-tab-bg);border:1px solid var(--wr-line);
+  font:inherit;text-align:left;width:100%;color:inherit;cursor:pointer}
+.lr-asal-baris:hover:not(:disabled){background:var(--wr-btn-bg-hover)}
+.lr-asal-baris[aria-expanded='true']{border-color:var(--wr-in-border,var(--wr-field-border))}
+.lr-asal-baris:disabled{cursor:default}
+.lr-asal-baris:focus-visible,.lr-sel:focus-visible{outline:2px solid var(--wr-focus,#00D084);outline-offset:2px}
+.lr-asal-baris[data-kosong='true']{opacity:.6}
+.lr-asal-titik{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.lr-asal-teks,.lr-asal-nilai,.lr-asal-bar{display:block}
+.lr-asal-teks b,.lr-asal-nilai b{display:block;font-size:.84rem;color:var(--txt-primary)}
+.lr-asal-teks small,.lr-asal-nilai small{display:block;font-size:.7rem;line-height:1.4;color:var(--wr-txt-muted);margin-top:1px}
+.lr-asal-bar{height:8px;border-radius:99px;background:var(--wr-line);overflow:hidden}
+.lr-asal-bar>i{display:block;height:100%;border-radius:99px}
+.lr-asal-nilai{text-align:right;font-variant-numeric:tabular-nums}
+.lr-asal-caret{color:var(--wr-txt-muted);transition:transform .15s}
+.lr-asal-caret[data-buka='true']{transform:rotate(90deg)}
+.lr-rinci .lr-sel{font-weight:600;font-size:.78rem;text-align:right;text-decoration:underline dotted;text-underline-offset:3px;font-variant-numeric:tabular-nums}
+.lr-det{margin-top:.8rem;border-radius:14px;border:1px solid var(--wr-line);background:var(--wr-tab-bg);padding:.9rem 1rem}
+.lr-det-h{display:flex;gap:.7rem;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.lr-det-h h4{margin:0;font-size:.92rem;font-weight:800;color:var(--txt-primary);display:flex;align-items:center;gap:.5rem}
+.lr-det-tools{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.75rem 0}
+.lr-det-tools input,.lr-det-tools select{font:inherit;font-size:.78rem;padding:.42rem .65rem;border-radius:9px;border:1px solid var(--wr-field-border);background:var(--wr-field-bg);color:var(--txt-primary)}
+.lr-det-tools input{flex:1 1 220px;min-width:0}
+.lr-det-wrap{max-height:460px;overflow:auto;border-radius:10px;border:1px solid var(--wr-line)}
+.lr-det-tbl{width:100%;border-collapse:collapse;font-size:.78rem}
+.lr-det-tbl th{position:sticky;top:0;background:var(--wr-tab-bg);font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--wr-txt-muted);text-align:right;padding:.5rem .6rem;border-bottom:1px solid var(--wr-line);white-space:nowrap}
+.lr-det-tbl td{padding:.5rem .6rem;text-align:right;border-bottom:1px solid var(--wr-line);color:var(--txt-primary);font-variant-numeric:tabular-nums;vertical-align:top}
+.lr-det-tbl th.l,.lr-det-tbl td.l{text-align:left}
+.lr-det-tbl td.kode{white-space:nowrap;color:var(--txt-secondary)}
+.lr-det-tbl td.nilai{font-weight:700;white-space:nowrap}
+.lr-det-tbl tr:last-child td{border-bottom:0}
+@media (max-width:640px){.lr-asal-baris{grid-template-columns:auto 1fr auto auto}.lr-asal-bar{display:none}}
 .lr-note{display:flex;gap:.5rem;align-items:flex-start;font-size:.72rem;color:var(--wr-txt-muted);margin:0 0 1rem}
 @keyframes lr-spin{to{transform:rotate(360deg)}}
 .lr-spin{animation:lr-spin .9s linear infinite}
@@ -273,6 +499,13 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
   const siteAktif = siteTerkunci ? auth.assignedSite : site;
   const [pilihanKey, setPilihanKey] = useState('ALL');
   const [kat, setKat] = useState<FilterKat>('ALL');
+  // Rincian barang yang sedang dibuka dari bagian "Asal Nilai Barang Masuk" (peruntukan + site yang diklik).
+  const [detail, setDetail] = useState<{ jenis: Peruntukan; site: string } | null>(null);
+  const refDetail = useRef<HTMLDivElement>(null);
+  const bukaDetail = (jenis: Peruntukan, siteKey: string) => setDetail((d) => (d && d.jenis === jenis && d.site === siteKey ? null : { jenis, site: siteKey }));
+  useEffect(() => {
+    if (detail) refDetail.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
+  }, [detail]);
 
   const [masukAll, setMasuk] = useState<BarisLaporan[]>([]);
   const [keluarAll, setKeluar] = useState<BarisLaporan[]>([]);
@@ -354,6 +587,9 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
     const urut = [...vendor.entries()].sort((a, b) => b[1] - a[1]);
     return { total, item: masuk.length, jumlahVendor: vendor.size, top: urut[0], deret: deretWaktu(masuk, granulKartu) };
   }, [masuk, granulKartu]);
+
+  // ── Asal nilai barang masuk (peruntukan + per site), mengikuti semua filter di atas ──
+  const asal = useMemo(() => rincianAsal(masuk), [masuk]);
 
   // ── Barang keluar ──
   const k = useMemo(() => {
@@ -493,6 +729,16 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
         <Kartu ikon={TrendingUp} nada={NADA.out} judul="Barang Masuk" sub={`Nilai penerimaan per ${namaGranul(granulKartu)} · ${labelPeriode}${tagKat}`} onDetail={() => onBuka('IN')}>
           <div className="lr-utama"><b>{rp(m.total)}</b><span>{angka(m.item)} baris penerimaan</span></div>
           <Garis data={m.deret} kunci="Nilai" warna={W['--wr-out']} />
+          {asal.total > 0 && (
+            <>
+              <div className="lr-stack" role="img" aria-label="Komposisi barang masuk menurut peruntukan">
+                {asal.jenis.filter((x) => x.nilai > 0).map((x) => <i key={x.key} title={`${x.nama}: ${rp(x.nilai)}`} style={{ width: `${x.pct}%`, background: pie(x.warna) }} />)}
+              </div>
+              <div className="lr-leg">
+                {asal.jenis.filter((x) => x.nilai > 0).map((x) => <span key={x.key}><i style={{ background: pie(x.warna) }} />{x.nama} · {fmtP(x.pct, 0)}</span>)}
+              </div>
+            </>
+          )}
           <div className="lr-fakta-wrap">
             <Fakta label="Vendor terbesar" nilai={m.top ? `${m.top[0]} · ${rp(m.top[1])}` : '–'} />
             <Fakta label="Jumlah vendor" nilai={angka(m.jumlahVendor)} />
@@ -546,6 +792,72 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
           ) : <div className="lr-nodata" style={{ minHeight: 150 }}>Belum ada data Safety Stock. Sinkronkan sumbernya di sub-menu.</div>}
         </Kartu>
       </div>
+
+      {/* ── Asal nilai barang masuk ── */}
+      <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label="Asal nilai barang masuk">
+        <h3 className="lr-judul">Asal Nilai Barang Masuk · {labelPeriode}{tagKat}</h3>
+        <p className="lr-sub" style={{ margin: '.2rem 0 .7rem' }}>Total {rp(asal.total)} dari {angka(masuk.length)} baris, dipecah menurut untuk apa barang itu dibeli (dibaca dari kode barang) dan dari site mana. Klik salah satu baris untuk melihat daftar barangnya.</p>
+        {asal.total <= 0 ? <div className="lr-nodata" style={{ minHeight: 90 }}>Belum ada barang masuk pada filter ini.</div> : (
+          <>
+            <div className="lr-asal">
+              {asal.jenis.map((x) => {
+                const buka = detail?.jenis === x.key && detail.site === 'ALL';
+                return (
+                  <button key={x.key} type="button" className="lr-asal-baris" data-kosong={x.nilai <= 0} disabled={x.nilai <= 0}
+                    aria-expanded={buka} aria-controls="lr-asal-detail" onClick={() => bukaDetail(x.key, 'ALL')}>
+                    <span className="lr-asal-titik" style={{ background: pie(x.warna) }} aria-hidden="true" />
+                    <span className="lr-asal-teks">
+                      <b>{x.nama}</b>
+                      <small>{x.ket}</small>
+                      {x.sub && <small>{x.sub}</small>}
+                      {x.key === 'OTHERS' && x.nilai > 0 && asal.contohOthers.length > 0 && <small>Contoh awalan kode: {asal.contohOthers.join(', ')}</small>}
+                    </span>
+                    <span className="lr-asal-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, x.pct)}%`, background: pie(x.warna) }} /></span>
+                    <span className="lr-asal-nilai"><b>{rp(x.nilai)}</b><small>{fmtP(x.pct, 1)} · {angka(x.baris)} baris</small></span>
+                    <ChevronRight size={16} className="lr-asal-caret" data-buka={buka} aria-hidden="true" />
+                  </button>
+                );
+              })}
+            </div>
+
+            {detail && (
+              <div ref={refDetail} style={{ scrollMarginTop: 80 }}>
+                <RincianPeruntukan key={`${detail.jenis}|${detail.site}|${siteAktif}`} rows={masuk} jenis={detail.jenis} siteAwal={detail.site}
+                  bisaPilihSite={siteAktif === 'global'} onTutup={() => setDetail(null)} />
+              </div>
+            )}
+
+            {siteAktif === 'global' && asal.perSite.length > 1 && (
+              <>
+                <h4 className="lr-judul" style={{ margin: '1.1rem 0 .5rem', fontSize: '.84rem' }}>Menurut Site</h4>
+                <div className="lr-scroll">
+                  <table className="lr-rinci">
+                    <thead>
+                      <tr><th>Site</th>{PERUNTUKAN.map((p) => <th key={p.key}>{p.nama}</th>)}<th>Total</th><th>Porsi</th></tr>
+                    </thead>
+                    <tbody>
+                      {asal.perSite.map((x) => (
+                        <tr key={x.key}>
+                          <td>{siteTerkunci || x.key === '-' ? <b>{x.label}</b> : <button type="button" title="Tampilkan hanya site ini" onClick={() => { setSite(x.key); setPilihanKey('ALL'); }}>{x.label}<small>{angka(x.baris)} baris</small></button>}</td>
+                          {PERUNTUKAN.map((p) => (
+                            <td key={p.key} style={x.per[p.key] <= 0 ? { color: 'var(--wr-txt-muted)' } : undefined}>
+                              {x.per[p.key] <= 0 ? '–' : x.key === '-' ? rupiahRingkas(x.per[p.key])
+                                : <button type="button" className="lr-sel" title={`Lihat rincian ${p.nama} di ${x.label}`} onClick={() => bukaDetail(p.key, x.key)}>{rupiahRingkas(x.per[p.key])}</button>}
+                            </td>
+                          ))}
+                          <td style={{ fontWeight: 800 }}>{rupiahRingkas(x.total)}</td>
+                          <td>{fmtP(x.pct, 1)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="lr-sub" style={{ margin: '.55rem 0 0' }}>Klik angka untuk melihat barangnya. Klik nama site untuk memfilter seluruh halaman ke site itu.</p>
+              </>
+            )}
+          </>
+        )}
+      </section>
 
       {/* ── Perbandingan masuk vs keluar ── */}
       <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label={`Perbandingan barang masuk dan keluar per ${namaGranul(granulBanding)}`}>

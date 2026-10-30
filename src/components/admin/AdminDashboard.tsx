@@ -36,6 +36,7 @@ import { usePerubahanLaporan, waktuMs } from './weeklyChanges';
 import { NotifPerubahanLaporan } from './NotifPerubahanLaporan';
 import { WeeklyReportView } from './WeeklyReportView';
 import { LaporanRingkasan } from './LaporanRingkasan';
+import { DashboardRingkas, type TujuanDash } from './DashboardRingkas';
 import {
   CategoriesView,
   AssignmentsView,
@@ -72,7 +73,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
   // yang terkunci diabaikan di sini, jadi tidak ada jalur yang bisa membukanya.
   const setActiveView = (view: AdminView) => { if (menuTerbuka(view)) setActiveViewRaw(view); };
   // Isi halaman Laporan (Ringkasan, Barang Masuk/Keluar, Outstanding PR, Safety Stock) dan Dashboard (Work Target, PICA).
-  const [laporanMode, setLaporanMode] = useState<LaporanMode>('RINGKASAN_LAPORAN');
+  const [laporanMode, setLaporanMode] = useState<LaporanMode>('DASHBOARD');
   // Tab halaman Aset Tetap & Depresiasi (Ringkasan / Register / Asset Management).
   const [asetTab, setAsetTab] = useState<AsetTab>('RINGKASAN');
   // Pencarian awal di menu Spare Part (dipakai saat berpindah dari Jadwal Maintenance ke sebuah part).
@@ -82,6 +83,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
     else if (t.ke === 'laporan') { setLaporanMode(t.mode); setActiveView('weekly-report'); }
     else if (t.ke === 'jadwal') setActiveView('work-orders');
     else { setAsetTab(t.tab); setActiveView('asset-registry'); }
+  };
+  // Perpindahan dari kartu / daftar "Perlu Perhatian" di Dashboard.
+  const bukaDariDashboard = (t: TujuanDash) => {
+    if (t.ke === 'transfer') setActiveView('assignments');
+    else if (t.ke === 'view') setActiveView(t.view);
+    else bukaDariJadwal(t);
   };
   // Konteks dari Global Search: site/tahun yang harus langsung terbuka di halaman tujuan.
   // `n` berubah tiap kali agar halaman tujuan dibuat ulang dan memakai konteks barunya.
@@ -675,7 +682,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
         {activeView === 'reports' && (
           <ReportsView summary={reportsSummary} fixedAssets={fixedAssets} workOrders={workOrders} />
         )}
-        {activeView === 'weekly-report' && (laporanMode === 'RINGKASAN_LAPORAN'
+        {activeView === 'weekly-report' && (laporanMode === 'DASHBOARD'
+          ? <DashboardRingkas auth={auth} jumlahPengguna={isSuperAdmin ? users.length : undefined} onNavigasi={bukaDariDashboard} />
+          : laporanMode === 'RINGKASAN_LAPORAN'
           ? <LaporanRingkasan auth={auth} onBuka={(m) => setLaporanMode(m)} />
           : <WeeklyReportView key={fokus?.n ?? 0} auth={auth} mode={laporanMode} siteFokus={fokus?.site} tahunFokus={fokus?.tahun} />)}
         {activeView === 'audit' && <AuditView logs={logs} />}

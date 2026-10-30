@@ -48,13 +48,14 @@ export type AdminView =
   | 'users';
 
 /** Mode isi halaman Laporan Mingguan (dipilih lewat sub-menu sidebar atau tab di halaman). */
-export type LaporanMode = 'RINGKASAN_LAPORAN' | 'WORK_TARGET' | 'IN' | 'OUT' | 'OS_PR' | 'MIN_STOCK' | 'ASET' | 'PICA';
+export type LaporanMode = 'DASHBOARD' | 'RINGKASAN_LAPORAN' | 'WORK_TARGET' | 'IN' | 'OUT' | 'OS_PR' | 'MIN_STOCK' | 'ASET' | 'PICA';
 
 /** Tab di halaman Aset Tetap & Depresiasi (dipilih lewat sub-menu sidebar atau tab di halaman). */
 export type AsetTab = 'RINGKASAN' | 'ASSET_MGMT';
 
 type ItemSub = { id: string; label: string; icon: React.ElementType };
 const SUB_DASHBOARD: ItemSub[] = [
+  { id: 'DASHBOARD', label: 'Ringkasan Dashboard', icon: LayoutDashboard },
   { id: 'WORK_TARGET', label: 'Work Target / KPI', icon: Target },
   { id: 'PICA', label: 'PICA', icon: ClipboardList },
 ];
@@ -249,7 +250,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ active, onNavigate, isOpen, on
   const grupSub: Partial<Record<AdminView, GrupSub>> = {};
   if (onNavigateLaporan) {
     const pilih = (id: string) => onNavigateLaporan(id as LaporanMode);
-    grupSub.dashboard = { view: 'weekly-report', awal: 'WORK_TARGET', items: SUB_DASHBOARD, aktifId: laporanMode, pilih };
+    grupSub.dashboard = { view: 'weekly-report', awal: 'DASHBOARD', items: SUB_DASHBOARD, aktifId: laporanMode, pilih };
     grupSub['weekly-report'] = { view: 'weekly-report', awal: 'RINGKASAN_LAPORAN', items: SUB_LAPORAN, aktifId: laporanMode, pilih };
   }
   if (onNavigateAset) {

@@ -273,6 +273,7 @@ function PanelGrafik({ judul, children, tinggi = 250 }: { judul: string; childre
 // Judul halaman mengikuti menu yang dibuka dari sidebar.
 const TEKS_MASUK_KELUAR = 'Rekap penggunaan part, overhaul, oli, dan biaya lain-lain per minggu untuk setiap Mother Station, ditarik langsung dari Google Spreadsheet milik site.';
 const JUDUL_MODE: Record<LaporanMode, { judul: string; sub: string }> = {
+  DASHBOARD: { judul: 'Dashboard', sub: 'Poin penting dari semua menu.' },
   RINGKASAN_LAPORAN: { judul: 'Ringkasan Laporan', sub: 'Gambaran garis besar barang masuk, barang keluar, Outstanding PR, dan Safety Stock.' },
   IN: { judul: 'Laporan Barang Masuk', sub: 'Rekap penerimaan barang per minggu untuk setiap Mother Station, ditarik langsung dari Google Spreadsheet milik site.' },
   OUT: { judul: 'Laporan Barang Keluar', sub: TEKS_MASUK_KELUAR },
