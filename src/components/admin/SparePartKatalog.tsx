@@ -4,10 +4,10 @@
 // kodenya diawali I-RDA atau I-RCE. Tiap kode menjadi satu item: total masuk/keluar,
 // sisa stok, harga rata-rata, laju pemakaian, dan status kecukupan. Klik baris
 // untuk melihat rincian per site, tren harga, dan transaksi terakhir.
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Boxes, Wallet, TrendingUp, TrendingDown, AlertTriangle, Download, RefreshCw, Loader2, Search, X,
-  ChevronLeft, ChevronRight, ArrowUpDown,
+  ChevronLeft, ChevronRight, ArrowUpDown, ChevronDown, CalendarRange,
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { getSites } from '../../data/siteStore';
@@ -25,6 +25,9 @@ import {
 } from './sparePartUi';
 
 const NAMA_BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+const NAMA_BULAN_PENUH = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+const MAKS_MINGGU_GRAFIK = 16;
+const MAKS_BULAN_GRAFIK = 12;
 const STATUS: StatusSp[] = ['Kritis', 'Waspada', 'Aman', 'Tidak Bergerak', 'Cek Stok'];
 const PER_HALAMAN = 20;
 type Kolom = 'kode' | 'nama' | 'masuk' | 'keluar' | 'saldo' | 'hargaRata' | 'nilaiKeluar' | 'terakhir' | 'status';
@@ -39,6 +42,9 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
   const [entitas, setEntitas] = useState<'ALL' | Entitas>('ALL');
   const [tahun, setTahun] = useState<'ALL' | number>('ALL');
   const [status, setStatus] = useState<'ALL' | StatusSp>('ALL');
+  const [bulan, setBulan] = useState<'ALL' | number>('ALL');
+  const [minggu, setMinggu] = useState<'ALL' | number>('ALL');
+  const [skala, setSkala] = useState<'bulan' | 'minggu'>('bulan');
   const [cari, setCari] = useState(cariAwal ?? '');
   // Berpindah dari menu lain (mis. Jadwal Maintenance) dengan kode tertentu → isi pencarian dengan kode itu.
   useEffect(() => { if (cariAwal !== undefined) setCari(cariAwal); }, [cariAwal]);
@@ -49,12 +55,26 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
   const tahunAda = useMemo(() => [...new Set(rows.map((r) => r.tahun).filter(Boolean))].sort((a, b) => b - a), [rows]);
   const siteAda = useMemo(() => new Set(rows.map((r) => r.site)), [rows]);
 
+  // rowsF: site + entitas + tahun. Dipakai untuk saldo/status stok (harus kumulatif, bukan per periode).
   const rowsF = useMemo(() => rows.filter((r) =>
     (site === 'ALL' || r.site === site) &&
     (entitas === 'ALL' || entitasDariKode(r.kode) === entitas) &&
     (tahun === 'ALL' || r.tahun === tahun)), [rows, site, entitas, tahun]);
 
+  // rowsP: rowsF + filter Bulan/Minggu. Dipakai untuk angka aliran (nilai masuk/keluar, peringkat, per site).
+  const periodeAktif = bulan !== 'ALL' || minggu !== 'ALL';
+  const rowsP = useMemo(() => !periodeAktif ? rowsF : rowsF.filter((r) =>
+    (bulan === 'ALL' || r.bulan === bulan) && (minggu === 'ALL' || r.minggu === minggu)), [rowsF, bulan, minggu, periodeAktif]);
+
+  const nEstimasi = useMemo(() => rowsF.filter((r) => r.estimasi).length, [rowsF]);
+  const bulanAda = useMemo(() => [...new Set(rowsF.map((r) => r.bulan).filter((b) => b >= 1 && b <= 12))].sort((a, b) => a - b), [rowsF]);
+  const mingguAda = useMemo(() => [...new Set(rowsF.filter((r) => bulan === 'ALL' || r.bulan === bulan).map((r) => r.minggu).filter(Boolean))].sort((a, b) => a - b), [rowsF, bulan]);
+
   const semua = useMemo(() => bangunItem(rowsF), [rowsF]);
+  const semuaP = useMemo(() => (periodeAktif ? bangunItem(rowsP) : semua), [periodeAktif, rowsP, semua]);
+  const labelPeriode = periodeAktif
+    ? [bulan !== 'ALL' ? NAMA_BULAN_PENUH[bulan - 1] : '', tahun !== 'ALL' ? String(tahun) : '', minggu !== 'ALL' ? `Minggu ${minggu}` : ''].filter(Boolean).join(' · ')
+    : '';
 
   const hitungStatus = useMemo(() => {
     const c: Record<StatusSp, number> = { Kritis: 0, Waspada: 0, Aman: 0, 'Tidak Bergerak': 0, 'Cek Stok': 0 };
@@ -89,36 +109,53 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
     jenis: semua.length,
     rda: semua.filter((i) => i.entitas === 'RDA').length,
     rce: semua.filter((i) => i.entitas === 'RCE').length,
-    nilaiMasuk: semua.reduce((t, i) => t + i.nilaiMasuk, 0),
-    nilaiKeluar: semua.reduce((t, i) => t + i.nilaiKeluar, 0),
+    nilaiMasuk: semuaP.reduce((t, i) => t + i.nilaiMasuk, 0),
+    nilaiKeluar: semuaP.reduce((t, i) => t + i.nilaiKeluar, 0),
     nilaiSaldo: semua.reduce((t, i) => t + i.nilaiSaldo, 0),
-  }), [semua]);
+  }), [semua, semuaP]);
 
-  // Nilai per bulan (12 bulan terakhir yang punya data) — dua garis: masuk vs keluar.
-  const bulanan = useMemo(() => {
-    const per = new Map<string, { t: number; Masuk: number; Keluar: number; label: string }>();
+  // Tren Masuk vs Keluar. Memakai rowsF (bukan rowsP) supaya grafik tetap menampilkan deretan periode
+  // meskipun satu bulan/minggu sedang dipilih. Urut kronologis (lama → baru).
+  const tren = useMemo(() => {
+    type Pt = { t: number; Masuk: number; Keluar: number; label: string; penuh: string };
+    const per = new Map<string, Pt>();
     for (const r of rowsF) {
-      if (!r.tahun || !r.bulan) continue;
-      const key = `${r.tahun}-${String(r.bulan).padStart(2, '0')}`;
-      const e = per.get(key) ?? { t: r.tahun * 12 + r.bulan, Masuk: 0, Keluar: 0, label: `${NAMA_BULAN[r.bulan - 1]} ${String(r.tahun).slice(2)}` };
+      if (!r.tahun) continue;
+      let key: string; let t: number; let label: string; let penuh: string;
+      if (skala === 'bulan') {
+        if (!r.bulan) continue;
+        key = `${r.tahun}-${String(r.bulan).padStart(2, '0')}`; t = r.tahun * 100 + r.bulan;
+        label = `${NAMA_BULAN[r.bulan - 1]} ${String(r.tahun).slice(2)}`; penuh = `${NAMA_BULAN_PENUH[r.bulan - 1]} ${r.tahun}`;
+      } else {
+        if (!r.minggu || (bulan !== 'ALL' && r.bulan !== bulan)) continue;
+        key = `${r.tahun}-${String(r.minggu).padStart(2, '0')}`; t = r.tahun * 100 + r.minggu;
+        label = tahun === 'ALL' ? `M${r.minggu} '${String(r.tahun).slice(2)}` : `M${r.minggu}`;
+        penuh = `Minggu ${r.minggu} · ${r.tahun}${r.bulan ? ` (${NAMA_BULAN_PENUH[r.bulan - 1]})` : ''}`;
+      }
+      const e = per.get(key) ?? { t, Masuk: 0, Keluar: 0, label, penuh };
       if (r.direction === 'IN') e.Masuk += r.totalHarga; else e.Keluar += r.totalHarga;
       per.set(key, e);
     }
-    return [...per.values()].sort((a, b) => a.t - b.t).slice(-12);
-  }, [rowsF]);
+    const urut = [...per.values()].sort((a, b) => a.t - b.t);
+    // Buang periode kosong di ujung (mis. bulan mendatang yang belum ada transaksi).
+    while (urut.length && urut[urut.length - 1].Masuk === 0 && urut[urut.length - 1].Keluar === 0) urut.pop();
+    while (urut.length && urut[0].Masuk === 0 && urut[0].Keluar === 0) urut.shift();
+    if (skala === 'bulan') return urut.slice(-MAKS_BULAN_GRAFIK);
+    return bulan === 'ALL' ? urut.slice(-MAKS_MINGGU_GRAFIK) : urut;
+  }, [rowsF, skala, bulan, tahun]);
 
-  const topPakai = useMemo(() => [...semua].sort((a, b) => b.nilaiKeluar - a.nilaiKeluar).filter((i) => i.nilaiKeluar > 0).slice(0, 8)
-    .map((i) => ({ label: i.nama || i.kode, sub: i.kode, nilai: i.nilaiKeluar, teks: rp(i.nilaiKeluar) })), [semua]);
+  const topPakai = useMemo(() => [...semuaP].sort((a, b) => b.nilaiKeluar - a.nilaiKeluar).filter((i) => i.nilaiKeluar > 0).slice(0, 8)
+    .map((i) => ({ label: i.nama || i.kode, sub: i.kode, nilai: i.nilaiKeluar, teks: rp(i.nilaiKeluar) })), [semuaP]);
 
   const perSite = useMemo(() => {
     const m = new Map<string, { keluar: number; masuk: number; jenis: number }>();
-    for (const i of semua) for (const s of i.perSite) {
+    for (const i of semuaP) for (const s of i.perSite) {
       const e = m.get(s.site) ?? { keluar: 0, masuk: 0, jenis: 0 };
       e.keluar += s.nilaiKeluar; e.masuk += s.nilaiMasuk; e.jenis += 1; m.set(s.site, e);
     }
     return [...m.entries()].sort((a, b) => b[1].keluar - a[1].keluar)
       .map(([s, v]) => ({ label: namaSite(s), sub: `${angka(v.jenis)} jenis · masuk ${rupiahRingkas(v.masuk)}`, nilai: v.keluar, teks: rp(v.keluar) }));
-  }, [semua]);
+  }, [semuaP]);
 
   const ekspor = () => unduhCsv(`spare-part-${hariIni()}.csv`, [
     ['Kode', 'Entitas', 'Nama', 'Satuan', 'Masuk', 'Keluar', 'Sisa Stok (Estimasi)', 'Harga Rata-rata', 'Nilai Masuk', 'Nilai Keluar', 'Laju / Minggu', 'Cukup Untuk (minggu)', 'Terakhir Bergerak', 'Status'],
@@ -134,7 +171,7 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
   );
 
   const sumbu = { fontSize: 11, fill: W['--wr-txt-muted'] };
-  const filterAktif = site !== 'ALL' || entitas !== 'ALL' || tahun !== 'ALL' || status !== 'ALL' || cari.trim() !== '';
+  const filterAktif = site !== 'ALL' || entitas !== 'ALL' || tahun !== 'ALL' || periodeAktif || status !== 'ALL' || cari.trim() !== '';
   const itemDetail = detail ? semua.find((i) => i.kode === detail) ?? null : null;
 
   return (
@@ -152,9 +189,21 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
           </label>
         )}
         <label>Tahun
-          <select className="wr-ctl sp2-ctl" value={tahun} onChange={(e) => setTahun(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}>
+          <select className="wr-ctl sp2-ctl" value={tahun} onChange={(e) => { setTahun(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value)); setMinggu('ALL'); }}>
             <option value="ALL">Semua</option>
             {tahunAda.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+        <label>Bulan
+          <select className="wr-ctl sp2-ctl" value={bulan} onChange={(e) => { setBulan(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value)); setMinggu('ALL'); }}>
+            <option value="ALL">Semua</option>
+            {bulanAda.map((b) => <option key={b} value={b}>{NAMA_BULAN_PENUH[b - 1]}</option>)}
+          </select>
+        </label>
+        <label>Minggu
+          <select className="wr-ctl sp2-ctl" value={minggu} onChange={(e) => setMinggu(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}>
+            <option value="ALL">Semua</option>
+            {mingguAda.map((m) => <option key={m} value={m}>Minggu {m}</option>)}
           </select>
         </label>
         <div role="group" aria-label="Entitas" style={{ display: 'flex', gap: '.35rem' }}>
@@ -166,7 +215,7 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
           <Search size={15} aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--wr-txt-muted)' }} />
           <input className="wr-ctl sp2-ctl" style={{ width: '100%', paddingLeft: 32 }} placeholder="Cari kode atau nama…" value={cari} onChange={(e) => setCari(e.target.value)} aria-label="Cari spare part" />
         </div>
-        {filterAktif && <button type="button" className="sp2-btn" onClick={() => { setSite('ALL'); setEntitas('ALL'); setTahun('ALL'); setStatus('ALL'); setCari(''); }}><X size={14} /> Reset</button>}
+        {filterAktif && <button type="button" className="sp2-btn" onClick={() => { setSite('ALL'); setEntitas('ALL'); setTahun('ALL'); setBulan('ALL'); setMinggu('ALL'); setStatus('ALL'); setCari(''); }}><X size={14} /> Reset</button>}
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '.45rem' }}>
           <button type="button" className="sp2-btn" onClick={muatUlang} disabled={memuat} title="Muat ulang dari server">
             {memuat ? <Loader2 size={14} className="sp2-spin" /> : <RefreshCw size={14} />} Muat Ulang
@@ -174,6 +223,15 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
           <button type="button" className="sp2-btn" onClick={ekspor} disabled={!daftar.length}><Download size={14} /> Export</button>
         </span>
       </div>
+
+      {periodeAktif && rows.length > 0 && (
+        <p className="sp2-info"><CalendarRange size={13} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4 }} />
+          Periode: <b>{labelPeriode}</b>. Berlaku untuk nilai masuk/keluar, peringkat, dan pemakaian per site. Sisa stok &amp; status kecukupan tetap dihitung dari seluruh riwayat agar akurat.</p>
+      )}
+
+      {nEstimasi > 0 && (
+        <p className="sp2-info">Nilai pada <b>{angka(nEstimasi)}</b> transaksi belum diisi di sheet, jadi dihitung otomatis dari harga satuan pembelian kode yang sama (ditandai ≈ di rincian).</p>
+      )}
 
       {galat && <div className="glass-panel" style={{ borderRadius: 14, padding: '.7rem 1rem', marginBottom: '1rem', fontSize: '.78rem', color: NADA.neg.teks }}>{galat}</div>}
 
@@ -196,14 +254,19 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
 
           {/* ── Tren & peringkat ── */}
           <div className="sp2-row">
-            <Panel judul="Nilai Masuk vs Keluar per Bulan" baca="Biru = nilai spare part yang masuk, kuning = yang dipakai. Garis kuning di atas biru berarti pemakaian melampaui penerimaan pada bulan itu." tinggi={270}>
-              {bulanan.length < 2 ? <div className="sp2-kosong">Data bulanan belum cukup untuk grafik.</div> : (
+            <Panel judul={skala === 'bulan' ? 'Nilai Masuk vs Keluar per Bulan' : 'Nilai Masuk vs Keluar per Minggu'}
+              baca={`Biru = masuk, kuning = dipakai. Urut dari periode terlama ke terbaru (${skala === 'bulan' ? `maks. ${MAKS_BULAN_GRAFIK} bulan terakhir` : bulan === 'ALL' ? `${MAKS_MINGGU_GRAFIK} minggu terakhir` : `semua minggu di ${NAMA_BULAN_PENUH[(bulan as number) - 1]}`}). Kuning di atas biru = pemakaian melampaui penerimaan.`}
+              aksi={<div className="sp2-seg" role="group" aria-label="Skala waktu grafik">
+                <button type="button" aria-pressed={skala === 'bulan'} onClick={() => setSkala('bulan')}>Bulanan</button>
+                <button type="button" aria-pressed={skala === 'minggu'} onClick={() => setSkala('minggu')}>Mingguan</button>
+              </div>} tinggi={270}>
+              {tren.length < 2 ? <div className="sp2-kosong">Data {skala === 'bulan' ? 'bulanan' : 'mingguan'} belum cukup untuk grafik.</div> : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={bulanan} margin={{ top: 8, right: 14, left: 4, bottom: 0 }}>
+                  <LineChart data={tren} margin={{ top: 8, right: 14, left: 4, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} vertical={false} />
-                    <XAxis dataKey="label" tick={sumbu} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="label" tick={sumbu} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={14} />
                     <YAxis tickFormatter={tickRupiah} tick={sumbu} axisLine={false} tickLine={false} width={52} />
-                    <Tooltip {...tooltipProps} formatter={(v: unknown) => rp(Number(v) || 0)} cursor={{ stroke: W['--wr-cursor'] }} />
+                    <Tooltip {...tooltipProps} formatter={(v: unknown) => rp(Number(v) || 0)} labelFormatter={(_l: unknown, p: readonly { payload?: { penuh?: string } }[]) => p?.[0]?.payload?.penuh ?? ''} cursor={{ stroke: W['--wr-cursor'] }} />
                     <Legend wrapperStyle={{ fontSize: '.72rem' }} formatter={fmtLegend} />
                     <Line type="monotone" dataKey="Masuk" stroke={W['--wr-out']} strokeWidth={2.6} dot={{ r: 3.5, strokeWidth: 2 }} activeDot={{ r: 6 }} />
                     <Line type="monotone" dataKey="Keluar" stroke={W['--wr-warn']} strokeWidth={2.6} dot={{ r: 3.5, strokeWidth: 2 }} activeDot={{ r: 6 }} />
@@ -212,13 +275,20 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
               )}
             </Panel>
 
-            <Panel judul="Pemakaian per Site" baca="Nilai spare part yang dipakai di tiap site (terbesar ke terkecil).">
+            <Panel judul="Pemakaian per Site" baca={`Nilai spare part yang dipakai di tiap site (terbesar ke terkecil)${labelPeriode ? ` · ${labelPeriode}` : ''}.`}>
               <Peringkat baris={perSite} warna={W['--wr-warn']} kosong="Belum ada pemakaian tercatat." />
             </Panel>
           </div>
 
+          <RekapPeriode rows={rowsF} bulan={bulan} minggu={minggu}
+            onPilih={(t, b, m) => {
+              if (b === bulan && m === minggu) { setBulan('ALL'); setMinggu('ALL'); return; }
+              if (tahun === 'ALL') setTahun(t);
+              setBulan(b); setMinggu(m);
+            }} />
+
           <div className="sp2-row">
-            <Panel judul="8 Spare Part Paling Banyak Dipakai" baca="Berdasarkan nilai pemakaian pada filter saat ini.">
+            <Panel judul="8 Spare Part Paling Banyak Dipakai" baca={`Berdasarkan nilai pemakaian${labelPeriode ? ` pada ${labelPeriode}` : ' pada filter saat ini'}.`}>
               <Peringkat baris={topPakai} warna={W['--wr-out']} kosong="Belum ada pemakaian tercatat." />
             </Panel>
 
@@ -229,7 +299,7 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
                   const persen = semua.length ? (n / semua.length) * 100 : 0;
                   return (
                     <button key={s} type="button" onClick={() => setStatus(status === s ? 'ALL' : s)} aria-pressed={status === s}
-                      style={{ display: 'grid', gridTemplateColumns: '116px 1fr auto', gap: '.7rem', alignItems: 'center', padding: '.45rem .6rem', borderRadius: 12, cursor: 'pointer', font: 'inherit', textAlign: 'left',
+                      style={{ display: 'grid', gridTemplateColumns: '116px minmax(0, 1fr) auto', gap: '.7rem', alignItems: 'center', padding: '.45rem .6rem', borderRadius: 12, cursor: 'pointer', font: 'inherit', textAlign: 'left',
                         background: status === s ? NADA_STATUS[s].bg : 'var(--wr-tab-bg)', border: `1px solid ${status === s ? NADA_STATUS[s].garis : 'var(--wr-line)'}` }}>
                       <ChipStatus s={s} />
                       <div className="sp2-bar" style={{ marginTop: 0 }}><span style={{ width: `${persen}%`, background: NADA_STATUS[s].warna }} /></div>
@@ -295,6 +365,82 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
   );
 }
 
+// ── Rekap per bulan → minggu (urut kronologis, klik untuk menyaring) ─────
+function RekapPeriode({ rows, bulan, minggu, onPilih }: {
+  rows: import('./sparePartData').BarisSp[]; bulan: 'ALL' | number; minggu: 'ALL' | number;
+  onPilih: (tahun: number, bulan: number, minggu: 'ALL' | number) => void;
+}) {
+  const [arah, setArah] = useState<'desc' | 'asc'>('desc');
+  const [buka, setBuka] = useState<Set<string>>(new Set());
+
+  const data = useMemo(() => {
+    type Mg = { minggu: number; masuk: number; keluar: number; trx: number };
+    type Bl = { key: string; tahun: number; bulan: number; masuk: number; keluar: number; trx: number; mgg: Map<number, Mg> };
+    const m = new Map<string, Bl>();
+    for (const r of rows) {
+      if (!r.tahun || !r.bulan) continue;
+      const key = `${r.tahun}-${String(r.bulan).padStart(2, '0')}`;
+      const b = m.get(key) ?? { key, tahun: r.tahun, bulan: r.bulan, masuk: 0, keluar: 0, trx: 0, mgg: new Map<number, Mg>() };
+      const w = b.mgg.get(r.minggu) ?? { minggu: r.minggu, masuk: 0, keluar: 0, trx: 0 };
+      if (r.direction === 'IN') { b.masuk += r.totalHarga; w.masuk += r.totalHarga; } else { b.keluar += r.totalHarga; w.keluar += r.totalHarga; }
+      b.trx += 1; w.trx += 1; b.mgg.set(r.minggu, w); m.set(key, b);
+    }
+    const f = arah === 'asc' ? 1 : -1;
+    return [...m.values()].filter((b) => b.masuk > 0 || b.keluar > 0).sort((a, b) => (a.tahun * 100 + a.bulan - (b.tahun * 100 + b.bulan)) * f)
+      .map((b) => ({ ...b, minggu: [...b.mgg.values()].filter((w) => w.minggu > 0).sort((a, c) => (a.minggu - c.minggu) * f) }));
+  }, [rows, arah]);
+
+  const toggle = (k: string) => setBuka((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const sel = (v: number) => ({ color: v >= 0 ? NADA.in.teks : NADA.neg.teks });
+
+  return (
+    <div className="sp2-row" style={{ gridTemplateColumns: 'minmax(0,1fr)' }}>
+      <Panel judul="Rekap Periode (Bulan → Minggu)" baca="Klik nama bulan atau minggu untuk menyaring seluruh halaman; klik lagi untuk melepas. Panah untuk membuka rincian minggu."
+        aksi={<div className="sp2-seg" role="group" aria-label="Urutan periode">
+          <button type="button" aria-pressed={arah === 'desc'} onClick={() => setArah('desc')}>Terbaru</button>
+          <button type="button" aria-pressed={arah === 'asc'} onClick={() => setArah('asc')}>Terlama</button>
+        </div>}>
+        {data.length === 0 ? <div className="sp2-kosong">Belum ada transaksi bernilai pada filter ini.</div> : (
+          <div className="sp2-rekap" tabIndex={0} aria-label="Tabel rekap periode">
+            <table>
+              <thead><tr><th>Periode</th><th>Masuk</th><th>Keluar</th><th>Selisih</th><th>Transaksi</th></tr></thead>
+              <tbody>
+                {data.map((b) => {
+                  const terbuka = buka.has(b.key) || (bulan === b.bulan && minggu !== 'ALL');
+                  const aktifB = bulan === b.bulan && minggu === 'ALL';
+                  return (
+                    <Fragment key={b.key}>
+                      <tr className={`bln${aktifB ? ' pilih' : ''}`}>
+                        <td>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem' }}>
+                            <button type="button" className="sp2-rk-btn" onClick={() => toggle(b.key)} aria-expanded={terbuka} aria-label={`Rincian minggu ${NAMA_BULAN_PENUH[b.bulan - 1]} ${b.tahun}`}>
+                              <ChevronDown size={14} style={{ transform: terbuka ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }} />
+                            </button>
+                            <button type="button" className="sp2-rk-btn" onClick={() => onPilih(b.tahun, b.bulan, 'ALL')} title="Saring bulan ini">
+                              {NAMA_BULAN_PENUH[b.bulan - 1]} {b.tahun} <small style={{ fontWeight: 500, opacity: .7 }}>· {b.minggu.length} minggu</small>
+                            </button>
+                          </span>
+                        </td>
+                        <td>{rp(b.masuk)}</td><td>{rp(b.keluar)}</td><td style={sel(b.masuk - b.keluar)}>{rp(b.masuk - b.keluar)}</td><td>{angka(b.trx)}</td>
+                      </tr>
+                      {terbuka && b.minggu.map((w) => (
+                        <tr key={`${b.key}-${w.minggu}`} className={`mgg${bulan === b.bulan && minggu === w.minggu ? ' pilih' : ''}`}>
+                          <td><button type="button" className="sp2-rk-btn" onClick={() => onPilih(b.tahun, b.bulan, w.minggu)} title="Saring minggu ini">Minggu {w.minggu}</button></td>
+                          <td>{rp(w.masuk)}</td><td>{rp(w.keluar)}</td><td style={sel(w.masuk - w.keluar)}>{rp(w.masuk - w.keluar)}</td><td>{angka(w.trx)}</td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
 // ── Rincian satu spare part ──────────────────────────────────────────────
 function DetailItem({ item, onTutup }: { item: ItemSp; onTutup: () => void }) {
   const { W } = useWrTema();
@@ -316,7 +462,7 @@ function DetailItem({ item, onTutup }: { item: ItemSp; onTutup: () => void }) {
     }
     return [...per.values()].sort((a, b) => a.t - b.t).slice(-12);
   }, [item]);
-  const harga = useMemo(() => item.baris.filter((r) => r.direction === 'IN' && (r.harga > 0 || (r.jumlah > 0 && r.totalHarga > 0)))
+  const harga = useMemo(() => item.baris.filter((r) => r.direction === 'IN' && !r.estimasi && (r.harga > 0 || (r.jumlah > 0 && r.totalHarga > 0)))
     .map((r) => ({ label: fmtTanggal(waktuBaris(r)), Harga: Math.round(r.harga || r.totalHarga / r.jumlah) })).slice(-12), [item]);
   const terakhir = useMemo(() => [...item.baris].reverse().slice(0, 8), [item]);
   const sumbu = { fontSize: 11, fill: W['--wr-txt-muted'] };
@@ -392,6 +538,7 @@ function DetailItem({ item, onTutup }: { item: ItemSp; onTutup: () => void }) {
         </div>
 
         <h3 className="sp2-h3" style={{ margin: '0 0 .5rem' }}>Transaksi Terakhir</h3>
+        {terakhir.some((r) => r.estimasi) && <p className="sp2-baca" style={{ margin: '0 0 .5rem' }}>Tanda ≈ = nilai belum diisi di sheet, dihitung otomatis dari harga satuan pembelian kode ini.</p>}
         <div style={{ overflowX: 'auto' }}>
           <table className="sp2-tbl" style={{ minWidth: 560 }}>
             <thead><tr><th>Tanggal</th><th>Arah</th><th>Site</th><th className="r">Jumlah</th><th className="r">Nilai</th><th>Keterangan</th></tr></thead>
@@ -400,7 +547,7 @@ function DetailItem({ item, onTutup }: { item: ItemSp; onTutup: () => void }) {
                 <tr key={r.id}>
                   <td>{fmtTanggal(waktuBaris(r))}</td>
                   <td>{r.direction === 'IN' ? <span style={{ color: NADA.out.teks, fontWeight: 700 }}>Masuk</span> : <span style={{ color: NADA.warn.teks, fontWeight: 700 }}>Keluar</span>}</td>
-                  <td>{namaSite(r.site)}</td><td className="r">{qty(r.jumlah)} {r.satuan}</td><td className="r">{rp(r.totalHarga)}</td>
+                  <td>{namaSite(r.site)}</td><td className="r">{qty(r.jumlah)} {r.satuan}</td><td className="r" title={r.estimasi ? 'Nilai tidak tercatat di sheet; dihitung dari harga satuan pembelian kode ini.' : undefined}>{r.estimasi && r.totalHarga > 0 ? '≈ ' : ''}{rp(r.totalHarga)}</td>
                   <td>{potong(r.alokasi || r.detailAlokasi || '—', 40)}</td>
                 </tr>
               ))}

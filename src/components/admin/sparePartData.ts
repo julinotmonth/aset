@@ -18,6 +18,8 @@ export interface BarisSp {
   tanggal: string | null; minggu: number; bulan: number; tahun: number;
   kode: string; namaBarang: string; jumlah: number; satuan: string;
   alokasi: string; detailAlokasi: string; harga: number; totalHarga: number;
+  /** true bila harga/nilai tidak tercatat di sheet dan dilengkapi dari harga satuan kode yang sama. */
+  estimasi?: boolean;
 }
 export type Entitas = 'RDA' | 'RCE';
 export type StatusSp = 'Aman' | 'Waspada' | 'Kritis' | 'Tidak Bergerak' | 'Cek Stok';
@@ -64,6 +66,45 @@ export function waktuBaris(r: BarisSp): number | null {
 export const fmtTanggal = (ms: number | null): string =>
   ms === null ? '–' : new Date(ms).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 
+// ── Melengkapi harga yang kosong ─────────────────────────────────────────
+/**
+ * Sheet Barang Keluar (dan sebagian Barang Masuk) sering tidak mengisi harga, padahal harga satuan
+ * kode yang sama sudah tercatat di pembelian. Baris tanpa nilai dilengkapi begini:
+ *   1. harga satuan pembelian terakhir (semua site) pada/sebelum tanggal transaksi,
+ *   2. bila belum pernah dibeli sebelum tanggal itu → harga pembelian paling awal,
+ *   3. bila tidak ada pembelian berharga sama sekali → dibiarkan 0.
+ * Baris yang dilengkapi diberi `estimasi: true`. Harus dipanggil pada data SEMUA site
+ * (bukan yang sudah difilter) supaya harga dari site lain ikut terpakai.
+ */
+export function lengkapiHarga(rows: BarisSp[]): BarisSp[] {
+  const harga = new Map<string, { t: number; satuan: number }[]>();
+  for (const r of rows) {
+    if (r.direction !== 'IN' || r.jumlah <= 0) continue;
+    const satuan = r.harga > 0 ? r.harga : r.totalHarga > 0 ? r.totalHarga / r.jumlah : 0;
+    if (satuan <= 0) continue;
+    const k = normKode(r.kode);
+    const arr = harga.get(k); const e = { t: waktuBaris(r) ?? 0, satuan };
+    if (arr) arr.push(e); else harga.set(k, [e]);
+  }
+  for (const arr of harga.values()) arr.sort((a, b) => a.t - b.t);
+
+  const cari = (kode: string, t: number): number => {
+    const arr = harga.get(kode);
+    if (!arr?.length) return 0;
+    let hasil = arr[0].satuan;
+    for (const e of arr) { if (e.t <= t) hasil = e.satuan; else break; }
+    return hasil;
+  };
+
+  return rows.map((r) => {
+    if (r.totalHarga > 0 || r.jumlah <= 0) return r;
+    const t = waktuBaris(r) ?? Number.MAX_SAFE_INTEGER;
+    const satuan = r.harga > 0 ? r.harga : cari(normKode(r.kode), t);
+    if (satuan <= 0) return r;
+    return { ...r, harga: satuan, totalHarga: Math.round(satuan * r.jumlah), estimasi: true };
+  });
+}
+
 // ── Pengambilan data (semua site, dengan cache singkat) ──────────────────
 const cache = new Map<string, { t: number; rows: BarisSp[] }>();
 const TTL_MS = 60_000;
@@ -90,9 +131,9 @@ export function useDataSparePart(auth: AuthState): HasilData {
       const semua: BarisSp[] = [];
       if (i.status === 'fulfilled') semua.push(...i.value); else gagal.push('Barang Masuk');
       if (o.status === 'fulfilled') semua.push(...o.value); else gagal.push('Barang Keluar');
-      const sp = semua.filter((r) => adalahSparePart(r.kode)).map((r) => ({
+      const sp = lengkapiHarga(semua.filter((r) => adalahSparePart(r.kode)).map((r) => ({
         ...r, jumlah: Number(r.jumlah) || 0, harga: Number(r.harga) || 0, totalHarga: Number(r.totalHarga) || 0,
-      }));
+      })));
       if (gagal.length < 2) cache.set(site, { t: Date.now(), rows: sp });
       setRows(sp);
       setGalat(gagal.length ? `Gagal memuat: ${gagal.join(', ')}.` : '');
