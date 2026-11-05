@@ -18,18 +18,21 @@ import { api } from '../../lib/api';
 import type { AuthState } from '../../types';
 import { NADA, SERI_PANJANG, tooltipProps, fmtLegend, WR_CSS, useWrTema } from './wrTema';
 import type { Nada } from './wrTema';
+import { labelPenuh } from './siteLabel';
 
 // ── Tipe (sesuai payload GET /api/outstanding-pr) ─────────────────────────
 interface Jumlah { pending: number; released: number; total: number }
 interface OsCat extends Jumlah { name: string }
 interface OsSite { key: string; label: string; categories: OsCat[]; totals: Jumlah }
-interface OsHist { week: string; label: string; date: string; total: number; pending: number; released: number }
+interface OsHist { week: string; label: string; date: string; total: number; pending: number | null; released: number | null }
 interface OsData {
   title: string; categories: string[]; sites: OsSite[]; grand: Jumlah; sheetGrand: Jumlah | null; notes: string[]; history: OsHist[];
 }
 interface OsSource { autoSync: boolean; lastSyncAt: string | null; lastStatus: string; sheetUrl?: string; manual?: boolean }
 interface OsPayload {
   source: OsSource | null; data: OsData | null; dataUpdatedAt?: string | null;
+  /** Terisi bila akun dibatasi ke satu site (non-Super Admin): data hanya milik site ini. */
+  scope?: { key: string; label: string };
   sync?: { ok: boolean; error?: string; rows?: number; sites?: number };
 }
 
@@ -171,6 +174,13 @@ export function OutstandingPrView({ auth }: Props) {
     <>
       <style>{WR_CSS}{OS_CSS}</style>
 
+      {payload?.scope && (
+        <div role="note" style={{ display: 'flex', gap: '.55rem', alignItems: 'flex-start', padding: '.6rem 1rem', borderRadius: 12, marginBottom: '1rem', fontSize: '.78rem', background: NADA.info.bg, border: `1px solid ${NADA.info.garis}`, color: NADA.info.teks }}>
+          <MapPin size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>Menampilkan data <strong>{labelPenuh(payload.scope.label)}</strong> saja, sesuai site akun Anda. Data site lain hanya dapat dilihat Super Admin.</span>
+        </div>
+      )}
+
       {/* ── Bar kontrol ── */}
       <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center' }}>
         {data && (
@@ -242,8 +252,12 @@ export function OutstandingPrView({ auth }: Props) {
       {!memuat && !data && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem 1.5rem', textAlign: 'center', color: warnaMuted, fontSize: '.85rem' }}>
           <FileText size={34} style={{ opacity: .55, marginBottom: '.6rem' }} />
-          <div style={{ fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.25rem' }}>Belum ada data Outstanding PR</div>
-          {isSuperAdmin ? 'Klik "Sumber Sheet", tempel link tab "RESUME ALL MS&WS", lalu "Simpan & Sinkronkan".' : 'Hubungi Super Admin untuk mengatur sumber sheet-nya.'}
+          <div style={{ fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.25rem' }}>
+            {payload?.scope ? `Belum ada data Outstanding PR untuk ${labelPenuh(payload.scope.label)}` : 'Belum ada data Outstanding PR'}
+          </div>
+          {payload?.scope
+            ? 'Site Anda belum tercantum di sheet Outstanding PR. Hubungi Super Admin bila seharusnya sudah ada.'
+            : isSuperAdmin ? 'Klik "Sumber Sheet", tempel link tab "RESUME ALL MS&WS", lalu "Simpan & Sinkronkan".' : 'Hubungi Super Admin untuk mengatur sumber sheet-nya.'}
         </div>
       )}
 
@@ -410,19 +424,19 @@ export function OutstandingPrView({ auth }: Props) {
           <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.1rem', marginBottom: '1rem' }}>
             <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.2rem' }}>Riwayat mingguan</div>
             <div style={{ fontSize: '.7rem', color: warnaMuted, marginBottom: '.6rem' }}>
-              Sheet hanya berisi kondisi terkini, jadi riwayat direkam otomatis setiap sinkron (satu titik per minggu, total seluruh site).
+              Sheet hanya berisi kondisi terkini, jadi riwayat direkam otomatis setiap sinkron (satu titik per minggu, {payload?.scope ? 'total site Anda' : 'total seluruh site'}).
             </div>
             {data.history.length >= 2 ? (
               <div style={{ height: 220 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={data.history.map((h) => ({ minggu: h.label, 'Total PR': h.total, 'Pending Approval': h.pending }))} margin={{ top: 8, right: 14, left: 0, bottom: 0 }}>
+                  <LineChart data={data.history.map((h) => ({ minggu: h.label, 'Total PR': h.total, 'Pending Approval': h.pending ?? undefined }))} margin={{ top: 8, right: 14, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={W['--wr-grid']} vertical={false} />
                     <XAxis dataKey="minggu" tick={{ fontSize: 10, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: W['--wr-txt-muted'] }} axisLine={false} tickLine={false} width={36} />
                     <Tooltip {...tooltipProps} cursor={{ stroke: W['--wr-cursor'] }} />
                     <Legend wrapperStyle={{ fontSize: '.7rem' }} formatter={fmtLegend} />
                     <Line type="monotone" dataKey="Total PR" stroke={W['--wr-out']} strokeWidth={2.6} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                    <Line type="monotone" dataKey="Pending Approval" stroke={rv(SERI_PANJANG[2])} strokeWidth={2} strokeDasharray="5 4" dot={{ r: 2.5 }} />
+                    {!payload?.scope && <Line type="monotone" dataKey="Pending Approval" stroke={rv(SERI_PANJANG[2])} strokeWidth={2} strokeDasharray="5 4" dot={{ r: 2.5 }} />}
                   </LineChart>
                 </ResponsiveContainer>
               </div>

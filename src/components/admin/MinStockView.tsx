@@ -20,6 +20,7 @@ import {
   NADA, SERI_PANJANG, POLA_GARIS, tooltipProps, fmtLegend, WR_CSS, useWrTema,
 } from './wrTema';
 import type { Nada } from './wrTema';
+import { labelPenuh } from './siteLabel';
 
 // ── Tipe (sesuai payload GET /api/min-stock) ──────────────────────────────
 type Titik = [number, number | null, number | null, number | null]; // [min, terealisasi, belum, pct dari sheet]
@@ -30,6 +31,8 @@ interface MsData { title: string; year: number | null; target: number; weeks: Ms
 interface MsSource { autoSync: boolean; lastSyncAt: string | null; lastStatus: string; sheetUrl?: string; manual?: boolean }
 interface MsPayload {
   source: MsSource | null; data: MsData | null; dataUpdatedAt?: string | null;
+  /** Terisi bila akun dibatasi ke satu site (non-Super Admin): data hanya milik site ini. */
+  scope?: { key: string; label: string };
   sync?: { ok: boolean; error?: string; rows?: number; filledWeeks?: number };
 }
 
@@ -315,6 +318,13 @@ export function MinStockView({ auth }: Props) {
     <>
       <style>{WR_CSS}{MS_CSS}</style>
 
+      {payload?.scope && (
+        <div role="note" style={{ display: 'flex', gap: '.55rem', alignItems: 'flex-start', padding: '.6rem 1rem', borderRadius: 12, marginBottom: '1rem', fontSize: '.78rem', background: NADA.info.bg, border: `1px solid ${NADA.info.garis}`, color: NADA.info.teks }}>
+          <Info size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>Menampilkan data <strong>{labelPenuh(payload.scope.label)}</strong> saja, sesuai site akun Anda. Data site lain hanya dapat dilihat Super Admin.</span>
+        </div>
+      )}
+
       {/* ── Bar kontrol ── */}
       <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center' }}>
         {data && wi >= 0 && (
@@ -410,8 +420,12 @@ export function MinStockView({ auth }: Props) {
       {!memuat && !data && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)', fontSize: '.85rem' }}>
           <PackageOpen size={34} style={{ opacity: .55, marginBottom: '.6rem' }} />
-          <div style={{ fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.25rem' }}>Belum ada data Pencapaian Safety Stock</div>
-          {isSuperAdmin ? 'Klik "Sumber Sheet", tempel link tab "Resume ALL Weekly", lalu "Simpan & Sinkronkan".' : 'Hubungi Super Admin untuk mengatur sumber sheet-nya.'}
+          <div style={{ fontWeight: 700, color: 'var(--txt-primary)', marginBottom: '.25rem' }}>
+            {payload?.scope ? `Belum ada data Safety Stock untuk ${labelPenuh(payload.scope.label)}` : 'Belum ada data Pencapaian Safety Stock'}
+          </div>
+          {payload?.scope
+            ? 'Site Anda belum tercantum (atau belum terisi realisasinya) di sheet Safety Stock. Hubungi Super Admin bila seharusnya sudah ada.'
+            : isSuperAdmin ? 'Klik "Sumber Sheet", tempel link tab "Resume ALL Weekly", lalu "Simpan & Sinkronkan".' : 'Hubungi Super Admin untuk mengatur sumber sheet-nya.'}
         </div>
       )}
 
