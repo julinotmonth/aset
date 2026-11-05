@@ -44,7 +44,7 @@ const tickRupiah = (n: number) => {
 const NAMA_BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 // ── Tipe payload (subset yang dipakai) ───────────────────────────────────
-interface BarisLaporan { minggu: number; bulan: number; totalHarga: number; alokasi: string; section: string; kode: string; tanggal: string | null; site: string; namaBarang: string; id: string; jumlah: number; satuan: string }
+interface BarisLaporan { minggu: number; bulan: number; totalHarga: number; alokasi: string; section: string; kode: string; tanggal: string | null; site: string; namaBarang: string; id: string; jumlah: number; satuan: string; detailAlokasi?: string; pic?: string }
 interface OsData {
   grand: { pending: number; released: number; total: number };
   sites: { key: string; label: string; totals: { total: number } }[];
@@ -257,6 +257,7 @@ const Fakta = ({ label, nilai, nada }: { label: string; nilai: string; nada?: Na
 );
 
 // ── Panel rincian: daftar barang pada satu peruntukan ────────────────────
+type Arah = 'masuk' | 'keluar';
 type ModeRincian = 'ITEM' | 'TRANSAKSI';
 type UrutRincian = 'NILAI' | 'QTY' | 'NAMA' | 'TERBARU';
 interface BarisItem { key: string; kode: string; nama: string; satuan: string; qty: number; nilai: number; baris: number; terakhir: string }
@@ -272,9 +273,10 @@ const BANDING_TRX: Record<UrutRincian, (a: BarisLaporan, b: BarisLaporan) => num
   NAMA: (a, b) => (a.namaBarang || '').localeCompare(b.namaBarang || '', 'id'), TERBARU: (a, b) => (b.tanggal || '').localeCompare(a.tanggal || ''),
 };
 
-/** Daftar barang pada satu peruntukan (Spare Part / Jasa / Aset / Others), per item atau per transaksi, lengkap dengan kuantitas dan nilai. */
-function RincianPeruntukan({ rows, jenis, siteAwal, bisaPilihSite, onTutup }: {
-  rows: BarisLaporan[]; jenis: Peruntukan; siteAwal: string; bisaPilihSite: boolean; onTutup: () => void;
+/** Daftar barang pada satu peruntukan (Spare Part / Jasa / Aset / Others), per item atau per transaksi, lengkap dengan kuantitas dan nilai.
+ *  Dipakai untuk Barang Masuk (kolom Vendor) dan Barang Keluar (kolom Alokasi). */
+function RincianPeruntukan({ arah, rows, jenis, siteAwal, bisaPilihSite, onTutup }: {
+  arah: Arah; rows: BarisLaporan[]; jenis: Peruntukan; siteAwal: string; bisaPilihSite: boolean; onTutup: () => void;
 }) {
   const { pie } = useWrTema();
   const meta = PERUNTUKAN.find((p) => p.key === jenis) ?? PERUNTUKAN[0];
@@ -291,7 +293,7 @@ function RincianPeruntukan({ rows, jenis, siteAwal, bisaPilihSite, onTutup }: {
   );
   const cocok = useMemo(() => {
     const q = cari.trim().toLowerCase();
-    return sejenis.filter((r) => (site === 'ALL' || (r.site || '-') === site) && (!q || `${r.kode} ${r.namaBarang} ${r.alokasi}`.toLowerCase().includes(q)));
+    return sejenis.filter((r) => (site === 'ALL' || (r.site || '-') === site) && (!q || `${r.kode} ${r.namaBarang} ${r.alokasi} ${r.detailAlokasi ?? ''} ${r.pic ?? ''}`.toLowerCase().includes(q)));
   }, [sejenis, site, cari]);
 
   // Item = kode + nama + satuan yang sama digabung, supaya kuantitasnya bisa dijumlahkan dengan benar.
@@ -322,7 +324,7 @@ function RincianPeruntukan({ rows, jenis, siteAwal, bisaPilihSite, onTutup }: {
   const labelSite = site === 'ALL' ? null : site === '-' ? 'Tanpa site' : labelSiteDariKey(site);
 
   return (
-    <div className="lr-det" role="region" aria-label={`Rincian barang masuk ${meta.nama}`} id="lr-asal-detail">
+    <div className="lr-det" role="region" aria-label={`Rincian barang ${arah} ${meta.nama}`} id={`lr-asal-detail-${arah}`}>
       <div className="lr-det-h">
         <div>
           <h4><span className="lr-asal-titik" style={{ background: pie(meta.warna) }} aria-hidden="true" />{meta.nama}{labelSite && <span style={{ fontWeight: 600 }}> · {labelSite}</span>}</h4>
@@ -334,7 +336,7 @@ function RincianPeruntukan({ rows, jenis, siteAwal, bisaPilihSite, onTutup }: {
       </div>
 
       <div className="lr-det-tools">
-        <input type="search" value={cari} placeholder="Cari kode, nama barang, atau vendor…" aria-label="Cari di rincian" onChange={(e) => { setCari(e.target.value); setBatas(HALAMAN); }} />
+        <input type="search" value={cari} placeholder={arah === 'masuk' ? 'Cari kode, nama barang, atau vendor…' : 'Cari kode, nama barang, alokasi, atau PIC…'} aria-label="Cari di rincian" onChange={(e) => { setCari(e.target.value); setBatas(HALAMAN); }} />
         {bisaPilihSite && (
           <select value={site} aria-label="Filter site pada rincian" onChange={(e) => { setSite(e.target.value); setBatas(HALAMAN); }}>
             <option value="ALL">Semua site</option>
@@ -369,12 +371,12 @@ function RincianPeruntukan({ rows, jenis, siteAwal, bisaPilihSite, onTutup }: {
             </table>
           ) : (
             <table className="lr-det-tbl">
-              <thead><tr><th className="l">Tanggal</th>{bisaPilihSite && <th className="l">Site</th>}<th className="l">Kode</th><th className="l">Nama Barang</th><th className="l">Vendor</th><th>Kuantitas</th><th>Nilai</th></tr></thead>
+              <thead><tr><th className="l">Tanggal</th>{bisaPilihSite && <th className="l">Site</th>}<th className="l">Kode</th><th className="l">Nama Barang</th><th className="l">{arah === 'masuk' ? 'Vendor' : 'Alokasi'}</th><th>Kuantitas</th><th>Nilai</th></tr></thead>
               <tbody>
                 {transaksi.slice(0, batas).map((r, i) => (
                   <tr key={r.id || i}>
                     <td className="l">{fmtTgl(r.tanggal)}</td>{bisaPilihSite && <td className="l">{r.site ? labelSiteDariKey(r.site) : '–'}</td>}
-                    <td className="l kode">{(r.kode || '').trim() || '–'}</td><td className="l">{r.namaBarang || '–'}</td><td className="l">{(r.alokasi || '').trim() || '–'}</td>
+                    <td className="l kode">{(r.kode || '').trim() || '–'}</td><td className="l">{r.namaBarang || '–'}</td><td className="l">{(r.alokasi || '').trim() || '–'}{arah === 'keluar' && (r.detailAlokasi || '').trim() && <small style={{ display: 'block', color: 'var(--wr-txt-muted)' }}>{r.detailAlokasi}</small>}</td>
                     <td>{fmtQty(Number(r.jumlah) || 0)}{r.satuan ? ` ${r.satuan}` : ''}</td><td className="nilai">{rp(Number(r.totalHarga) || 0)}</td>
                   </tr>
                 ))}
@@ -389,6 +391,93 @@ function RincianPeruntukan({ rows, jenis, siteAwal, bisaPilihSite, onTutup }: {
         </button>
       )}
     </div>
+  );
+}
+
+/** Bagian "Asal Nilai Barang Masuk/Keluar": nilai dipecah menurut peruntukan (dibaca dari kode barang) dan per site;
+ *  klik satu baris untuk melihat daftar barangnya. Mengikuti semua filter halaman (rows sudah terfilter). */
+function AsalNilaiSection({ arah, rows, labelPeriode, tagKat, siteAktif, siteTerkunci, onFilterSite }: {
+  arah: Arah; rows: BarisLaporan[]; labelPeriode: string; tagKat: string;
+  siteAktif: string; siteTerkunci: boolean; onFilterSite: (siteKey: string) => void;
+}) {
+  const { pie } = useWrTema();
+  const asal = useMemo(() => rincianAsal(rows), [rows]);
+  const [detail, setDetail] = useState<{ jenis: Peruntukan; site: string } | null>(null);
+  const refDetail = useRef<HTMLDivElement>(null);
+  const bukaDetail = (jenis: Peruntukan, siteKey: string) => setDetail((d) => (d && d.jenis === jenis && d.site === siteKey ? null : { jenis, site: siteKey }));
+  useEffect(() => {
+    if (detail) refDetail.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
+  }, [detail]);
+
+  const judul = arah === 'masuk' ? 'Barang Masuk' : 'Barang Keluar';
+  const tujuan = arah === 'masuk' ? 'dibeli' : 'dikeluarkan';
+  const idDetail = `lr-asal-detail-${arah}`;
+
+  return (
+    <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label={`Asal nilai ${judul.toLowerCase()}`}>
+      <h3 className="lr-judul">Asal Nilai {judul} · {labelPeriode}{tagKat}</h3>
+      <p className="lr-sub" style={{ margin: '.2rem 0 .7rem' }}>Total {rp(asal.total)} dari {angka(rows.length)} baris, dipecah menurut untuk apa barang itu {tujuan} (dibaca dari kode barang) dan dari site mana. Klik salah satu baris untuk melihat daftar barangnya.</p>
+      {asal.total <= 0 ? <div className="lr-nodata" style={{ minHeight: 90 }}>Belum ada {judul.toLowerCase()} pada filter ini.</div> : (
+        <>
+          <div className="lr-asal">
+            {asal.jenis.map((x) => {
+              const buka = detail?.jenis === x.key && detail.site === 'ALL';
+              return (
+                <button key={x.key} type="button" className="lr-asal-baris" data-kosong={x.nilai <= 0} disabled={x.nilai <= 0}
+                  aria-expanded={buka} aria-controls={idDetail} onClick={() => bukaDetail(x.key, 'ALL')}>
+                  <span className="lr-asal-titik" style={{ background: pie(x.warna) }} aria-hidden="true" />
+                  <span className="lr-asal-teks">
+                    <b>{x.nama}</b>
+                    <small>{x.ket}</small>
+                    {x.sub && <small>{x.sub}</small>}
+                    {x.key === 'OTHERS' && x.nilai > 0 && asal.contohOthers.length > 0 && <small>Contoh awalan kode: {asal.contohOthers.join(', ')}</small>}
+                  </span>
+                  <span className="lr-asal-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, x.pct)}%`, background: pie(x.warna) }} /></span>
+                  <span className="lr-asal-nilai"><b>{rp(x.nilai)}</b><small>{fmtP(x.pct, 1)} · {angka(x.baris)} baris</small></span>
+                  <ChevronRight size={16} className="lr-asal-caret" data-buka={buka} aria-hidden="true" />
+                </button>
+              );
+            })}
+          </div>
+
+          {detail && (
+            <div ref={refDetail} style={{ scrollMarginTop: 80 }}>
+              <RincianPeruntukan key={`${arah}|${detail.jenis}|${detail.site}|${siteAktif}`} arah={arah} rows={rows} jenis={detail.jenis} siteAwal={detail.site}
+                bisaPilihSite={siteAktif === 'global'} onTutup={() => setDetail(null)} />
+            </div>
+          )}
+
+          {siteAktif === 'global' && asal.perSite.length > 1 && (
+            <>
+              <h4 className="lr-judul" style={{ margin: '1.1rem 0 .5rem', fontSize: '.84rem' }}>Menurut Site</h4>
+              <div className="lr-scroll">
+                <table className="lr-rinci">
+                  <thead>
+                    <tr><th>Site</th>{PERUNTUKAN.map((p) => <th key={p.key}>{p.nama}</th>)}<th>Total</th><th>Porsi</th></tr>
+                  </thead>
+                  <tbody>
+                    {asal.perSite.map((x) => (
+                      <tr key={x.key}>
+                        <td>{siteTerkunci || x.key === '-' ? <b>{x.label}</b> : <button type="button" title="Tampilkan hanya site ini" onClick={() => onFilterSite(x.key)}>{x.label}<small>{angka(x.baris)} baris</small></button>}</td>
+                        {PERUNTUKAN.map((p) => (
+                          <td key={p.key} style={x.per[p.key] <= 0 ? { color: 'var(--wr-txt-muted)' } : undefined}>
+                            {x.per[p.key] <= 0 ? '–' : x.key === '-' ? rupiahRingkas(x.per[p.key])
+                              : <button type="button" className="lr-sel" title={`Lihat rincian ${p.nama} di ${x.label}`} onClick={() => bukaDetail(p.key, x.key)}>{rupiahRingkas(x.per[p.key])}</button>}
+                          </td>
+                        ))}
+                        <td style={{ fontWeight: 800 }}>{rupiahRingkas(x.total)}</td>
+                        <td>{fmtP(x.pct, 1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="lr-sub" style={{ margin: '.55rem 0 0' }}>Klik angka untuk melihat barangnya. Klik nama site untuk memfilter seluruh halaman ke site itu.</p>
+            </>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -499,14 +588,6 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
   const siteAktif = siteTerkunci ? auth.assignedSite : site;
   const [pilihanKey, setPilihanKey] = useState('ALL');
   const [kat, setKat] = useState<FilterKat>('ALL');
-  // Rincian barang yang sedang dibuka dari bagian "Asal Nilai Barang Masuk" (peruntukan + site yang diklik).
-  const [detail, setDetail] = useState<{ jenis: Peruntukan; site: string } | null>(null);
-  const refDetail = useRef<HTMLDivElement>(null);
-  const bukaDetail = (jenis: Peruntukan, siteKey: string) => setDetail((d) => (d && d.jenis === jenis && d.site === siteKey ? null : { jenis, site: siteKey }));
-  useEffect(() => {
-    if (detail) refDetail.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
-  }, [detail]);
-
   const [masukAll, setMasuk] = useState<BarisLaporan[]>([]);
   const [keluarAll, setKeluar] = useState<BarisLaporan[]>([]);
   const [os, setOs] = useState<OsData | null>(null);
@@ -793,71 +874,11 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
         </Kartu>
       </div>
 
-      {/* ── Asal nilai barang masuk ── */}
-      <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label="Asal nilai barang masuk">
-        <h3 className="lr-judul">Asal Nilai Barang Masuk · {labelPeriode}{tagKat}</h3>
-        <p className="lr-sub" style={{ margin: '.2rem 0 .7rem' }}>Total {rp(asal.total)} dari {angka(masuk.length)} baris, dipecah menurut untuk apa barang itu dibeli (dibaca dari kode barang) dan dari site mana. Klik salah satu baris untuk melihat daftar barangnya.</p>
-        {asal.total <= 0 ? <div className="lr-nodata" style={{ minHeight: 90 }}>Belum ada barang masuk pada filter ini.</div> : (
-          <>
-            <div className="lr-asal">
-              {asal.jenis.map((x) => {
-                const buka = detail?.jenis === x.key && detail.site === 'ALL';
-                return (
-                  <button key={x.key} type="button" className="lr-asal-baris" data-kosong={x.nilai <= 0} disabled={x.nilai <= 0}
-                    aria-expanded={buka} aria-controls="lr-asal-detail" onClick={() => bukaDetail(x.key, 'ALL')}>
-                    <span className="lr-asal-titik" style={{ background: pie(x.warna) }} aria-hidden="true" />
-                    <span className="lr-asal-teks">
-                      <b>{x.nama}</b>
-                      <small>{x.ket}</small>
-                      {x.sub && <small>{x.sub}</small>}
-                      {x.key === 'OTHERS' && x.nilai > 0 && asal.contohOthers.length > 0 && <small>Contoh awalan kode: {asal.contohOthers.join(', ')}</small>}
-                    </span>
-                    <span className="lr-asal-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, x.pct)}%`, background: pie(x.warna) }} /></span>
-                    <span className="lr-asal-nilai"><b>{rp(x.nilai)}</b><small>{fmtP(x.pct, 1)} · {angka(x.baris)} baris</small></span>
-                    <ChevronRight size={16} className="lr-asal-caret" data-buka={buka} aria-hidden="true" />
-                  </button>
-                );
-              })}
-            </div>
-
-            {detail && (
-              <div ref={refDetail} style={{ scrollMarginTop: 80 }}>
-                <RincianPeruntukan key={`${detail.jenis}|${detail.site}|${siteAktif}`} rows={masuk} jenis={detail.jenis} siteAwal={detail.site}
-                  bisaPilihSite={siteAktif === 'global'} onTutup={() => setDetail(null)} />
-              </div>
-            )}
-
-            {siteAktif === 'global' && asal.perSite.length > 1 && (
-              <>
-                <h4 className="lr-judul" style={{ margin: '1.1rem 0 .5rem', fontSize: '.84rem' }}>Menurut Site</h4>
-                <div className="lr-scroll">
-                  <table className="lr-rinci">
-                    <thead>
-                      <tr><th>Site</th>{PERUNTUKAN.map((p) => <th key={p.key}>{p.nama}</th>)}<th>Total</th><th>Porsi</th></tr>
-                    </thead>
-                    <tbody>
-                      {asal.perSite.map((x) => (
-                        <tr key={x.key}>
-                          <td>{siteTerkunci || x.key === '-' ? <b>{x.label}</b> : <button type="button" title="Tampilkan hanya site ini" onClick={() => { setSite(x.key); setPilihanKey('ALL'); }}>{x.label}<small>{angka(x.baris)} baris</small></button>}</td>
-                          {PERUNTUKAN.map((p) => (
-                            <td key={p.key} style={x.per[p.key] <= 0 ? { color: 'var(--wr-txt-muted)' } : undefined}>
-                              {x.per[p.key] <= 0 ? '–' : x.key === '-' ? rupiahRingkas(x.per[p.key])
-                                : <button type="button" className="lr-sel" title={`Lihat rincian ${p.nama} di ${x.label}`} onClick={() => bukaDetail(p.key, x.key)}>{rupiahRingkas(x.per[p.key])}</button>}
-                            </td>
-                          ))}
-                          <td style={{ fontWeight: 800 }}>{rupiahRingkas(x.total)}</td>
-                          <td>{fmtP(x.pct, 1)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="lr-sub" style={{ margin: '.55rem 0 0' }}>Klik angka untuk melihat barangnya. Klik nama site untuk memfilter seluruh halaman ke site itu.</p>
-              </>
-            )}
-          </>
-        )}
-      </section>
+      {/* ── Asal nilai barang masuk & keluar ── */}
+      <AsalNilaiSection arah="masuk" rows={masuk} labelPeriode={labelPeriode} tagKat={tagKat} siteAktif={siteAktif} siteTerkunci={siteTerkunci}
+        onFilterSite={(key) => { setSite(key); setPilihanKey('ALL'); }} />
+      <AsalNilaiSection arah="keluar" rows={keluar} labelPeriode={labelPeriode} tagKat={tagKat} siteAktif={siteAktif} siteTerkunci={siteTerkunci}
+        onFilterSite={(key) => { setSite(key); setPilihanKey('ALL'); }} />
 
       {/* ── Perbandingan masuk vs keluar ── */}
       <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label={`Perbandingan barang masuk dan keluar per ${namaGranul(granulBanding)}`}>

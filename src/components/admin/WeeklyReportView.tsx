@@ -185,15 +185,33 @@ type Entitas = 'RDA' | 'RCE' | 'RET' | 'UMUM';
 const LABEL_ENTITAS: Record<Entitas, string> = { RDA: 'Mother Station', RCE: 'Workshop', RET: 'RET', UMUM: 'Umum (tanpa entitas)' };
 const URUT_ENTITAS: Entitas[] = ['RDA', 'RCE', 'RET', 'UMUM'];
 
-/** Entitas dibaca dari nama tab sumber. Pola KHT "Out (1)"/"In (1)" = tab kedua = RCE. */
+// Entitas dibaca dulu dari KODE BARANG ("I-RDA-00294", "HSE-RDA-00013", "I-RCE-00267", "I-RET-0045"):
+// RDA = Mother Station, RCE = Workshop. Kode yang tidak memuat entitas (mis. kode aset "01.11-2026-0033")
+// memakai entitas dari NAMA TAB sumber; garis bawah dihitung pemisah, jadi tab "IN_RDA" / "IN_RCE" ikut terbaca.
+// (Aturan yang sama dipakai backend saat Export — lihat entitasBaris di weeklyReport.js.)
+const POLA_ENTITAS = /(?:^|[^A-Za-z])(RDA|RCE|RET)(?![A-Za-z])/i;
+/** Pola KHT "Out (1)"/"In (1)" = tab kedua = RCE. */
 function entitasDariTab(sourceTab: string): Entitas {
   const t = sourceTab || '';
-  if (/\bRDA\b/i.test(t)) return 'RDA';
-  if (/\bRCE\b/i.test(t)) return 'RCE';
-  if (/\bRET\b/i.test(t)) return 'RET';
+  const m = POLA_ENTITAS.exec(t);
+  if (m) return m[1].toUpperCase() as Entitas;
   if (/\(1\)/.test(t)) return 'RCE';
   return 'UMUM';
 }
+function entitasBaris(r: Pick<WeeklyRow, 'kode' | 'sourceTab'>): Entitas {
+  const m = POLA_ENTITAS.exec(r.kode || '');
+  return m ? (m[1].toUpperCase() as Entitas) : entitasDariTab(r.sourceTab);
+}
+/** Site yang otomatis satu entitas, tanpa menu pilihan: site LNG → RDA saja, site RET → RET saja. Site MS/WS → null (ada menu). */
+function entitasTetapSite(siteKey: string): Entitas | null {
+  const label = getSites().find((x) => x.key === siteKey)?.label ?? siteKey;
+  if (/\blng\b/i.test(label)) return 'RDA';
+  if (/^\s*ret\b/i.test(label) || /^ret([-_]|$)/i.test(siteKey)) return 'RET';
+  return null;
+}
+const KETERANGAN_ENTITAS: Record<Entitas, string> = {
+  RDA: 'Mother Station = kode RDA', RCE: 'Workshop = kode RCE', RET: 'RET = kode RET', UMUM: 'Umum = tanpa kode entitas',
+};
 
 /** Formatter tooltip recharts — nilainya bertipe longgar, jadi dinormalkan dulu. */
 const fmtTooltip = (v: unknown) => rupiahPenuh(Number(v) || 0);
@@ -330,14 +348,33 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   const [entitasPilih, setEntitasPilih] = useState<Entitas | ''>('');
   // Entitas yang benar-benar ada di data (urut RDA, RCE, RET, Umum) — hanya
   // untuk Barang Keluar/Masuk; daftar aset tidak dipisah per entitas.
+  // Site LNG / RET otomatis satu entitas (tanpa menu); site MS/WS memilih Mother Station (RDA) atau Workshop (RCE).
+  const entitasTetap = useMemo(() => entitasTetapSite(site), [site]);
   const entitasTersedia = useMemo(() => {
-    const ada = new Set(rowsSemua.map((r) => entitasDariTab(r.sourceTab)));
+    if (entitasTetap) return [entitasTetap];
+    const ada = new Set(rowsSemua.map((r) => entitasBaris(r)));
     return URUT_ENTITAS.filter((e) => ada.has(e));
-  }, [rowsSemua]);
+  }, [rowsSemua, entitasTetap]);
   const entitas: Entitas | '' = entitasTersedia.includes(entitasPilih as Entitas) ? (entitasPilih as Entitas) : (entitasTersedia[0] ?? '');
   const rows = useMemo(
-    () => (arah === 'ASET' ? rowsSemua : rowsSemua.filter((r) => entitasDariTab(r.sourceTab) === entitas)),
-    [rowsSemua, arah, entitas]);
+    () => (arah === 'ASET' ? rowsSemua : rowsSemua.filter((r) => {
+      const e = entitasBaris(r);
+      return e === entitas || (!!entitasTetap && e === 'UMUM'); // site LNG/RET: baris tanpa penanda entitas ikut
+    })),
+    [rowsSemua, arah, entitas, entitasTetap]);
+  // Menu entitas (Mother Station / Workshop) + keterangan kodenya; di site LNG/RET hanya keterangan otomatis.
+  const blokEntitas = entitasTersedia.length > 1 ? (
+    <div style={{ marginBottom: '.85rem', display: 'flex', alignItems: 'center', gap: '.4rem .75rem', flexWrap: 'wrap' }}>
+      <Segmen label={LABEL_ENTITAS[entitas as Entitas]} nilai={entitas as Entitas}
+        opsi={entitasTersedia.map((e) => ({ id: e, label: LABEL_ENTITAS[e] }))}
+        onUbah={setEntitasPilih} />
+      <span style={{ fontSize: '.74rem', color: 'var(--txt-muted)' }}>{entitasTersedia.map((e) => KETERANGAN_ENTITAS[e]).join(' · ')}</span>
+    </div>
+  ) : entitasTetap ? (
+    <p style={{ margin: '0 0 .85rem', fontSize: '.78rem', color: 'var(--txt-muted)' }}>
+      {entitasTetap === 'RDA' ? 'Site LNG: otomatis hanya data kode RDA.' : 'Site RET: otomatis hanya data kode RET.'}
+    </p>
+  ) : null;
   // Penerimaan setahun penuh (tanpa filter bulan) untuk ranking vendor per bulan.
   // Super Admin/user global = seluruh site (PT Reethau Dharma Andalan); user
   // yang terkunci di satu site hanya melihat site-nya sendiri.
@@ -795,6 +832,34 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     finally { setMenyinkron(false); if (fileRef.current) fileRef.current.value = ''; }
   };
 
+  // Export Barang Masuk / Keluar → Excel dengan template yang SAMA seperti sheet sumber
+  // (kolom, urutan, dan isi sel persis sheet; dibangun server dari header + sel asli yang disimpan saat sync).
+  const [mengekspor, setMengekspor] = useState(false);
+  const unduhExcel = async () => {
+    setMengekspor(true); setPesan(null);
+    try {
+      const q = new URLSearchParams({ site, direction: arah, tahun: String(tahun) });
+      if (bulan) q.set('bulan', String(bulan));
+      // Disaring per entitas menurut kode barang (Mother Station = RDA, Workshop = RCE); hasil otomatis urut per minggu.
+      if (arah !== 'ASET' && entitas && !(entitas === 'UMUM' && entitasTersedia.length === 1)) {
+        q.set('entitas', entitas);
+        if (entitasTetap) q.set('tetap', '1');
+      }
+      const { blob, namaFile, headers } = await api.unduh(`/weekly-reports/export?${q}`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = namaFile; a.click();
+      URL.revokeObjectURL(url);
+      const standar = Number(headers.get('X-Export-Fallback') || 0);
+      const tglIsi = Number(headers.get('X-Export-Tanggal-Terisi') || 0);
+      const catatanTgl = tglIsi > 0 ? ` ${tglIsi} tanggal yang kosong di sheet diisi otomatis dari nomor minggunya (ditandai kuning).` : '';
+      setPesan({ tipe: 'ok', teks: standar > 0
+        ? `${namaFile} diunduh. ${standar} tab memakai kolom standar karena belum disinkronkan ulang — klik “Sync Sekarang”, lalu Export lagi agar kolomnya persis sama dengan sheet sumber.${catatanTgl}`
+        : `${namaFile} diunduh — kolom dan isinya sama dengan sheet sumber, urut per minggu.${catatanTgl}` });
+    } catch (err) { setPesan({ tipe: 'error', teks: (err as Error).message }); }
+    finally { setMengekspor(false); }
+  };
+
   const unduhCsv = () => {
     const baris: string[][] = [];
     if (arah === 'OUT') {
@@ -917,8 +982,9 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         <input ref={fileRef} type="file" accept=".csv,text/csv" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void unggahCsv(f); }} />
 
-        <button type="button" className="wr-btn" onClick={unduhCsv} style={tombol}>
-          <Download size={15} /> Export
+        <button type="button" className="wr-btn" onClick={arah === 'ASET' ? unduhCsv : () => void unduhExcel()} disabled={mengekspor} aria-busy={mengekspor || undefined} style={tombol}
+          title={arah === 'ASET' ? 'Unduh daftar aset (CSV)' : 'Unduh Excel dengan template yang sama seperti sheet sumber'}>
+          {mengekspor ? <Loader2 size={15} /> : <Download size={15} />} {mengekspor ? 'Menyiapkan…' : 'Export'}
         </button>
 
         <button type="button" className="wr-btn wr-btn--primary" onClick={sinkronkan} disabled={menyinkron || !source} aria-busy={menyinkron || undefined}
@@ -1006,13 +1072,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       {/* ══════════════════ MODE: BARANG KELUAR ══════════════════ */}
       {!memuat && !kosong && arah === 'OUT' && (
         <>
-          {entitasTersedia.length > 1 && (
-            <div style={{ marginBottom: '.85rem' }}>
-              <Segmen label={LABEL_ENTITAS[entitas as Entitas]} nilai={entitas as Entitas}
-                opsi={entitasTersedia.map((e) => ({ id: e, label: LABEL_ENTITAS[e] }))}
-                onUbah={setEntitasPilih} />
-            </div>
-          )}
+          {blokEntitas}
           <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             {sectionsAktif.map((s) => (
               <KartuKpi key={s.key} ikon={Package} nada={s} label={LABEL_SEKSI[s.key]}
@@ -1129,13 +1189,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       {/* ══════════════════ MODE: BARANG MASUK ══════════════════ */}
       {!memuat && !kosong && arah === 'IN' && (
         <>
-          {entitasTersedia.length > 1 && (
-            <div style={{ marginBottom: '.85rem' }}>
-              <Segmen label={LABEL_ENTITAS[entitas as Entitas]} nilai={entitas as Entitas}
-                opsi={entitasTersedia.map((e) => ({ id: e, label: LABEL_ENTITAS[e] }))}
-                onUbah={setEntitasPilih} />
-            </div>
-          )}
+          {blokEntitas}
           <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             <KartuKpi ikon={TrendingUp} nada={NADA.in} label="Nilai Penerimaan" nilai={rupiahPenuh(masuk.nilai)}
               sub={`${labelPenuh(labelSite)}${bulan ? ` · ${NAMA_BULAN[bulan - 1]}` : ''} ${tahun}`} />

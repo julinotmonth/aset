@@ -2,7 +2,7 @@
 import type { ReactNode } from 'react';
 import { NADA } from './wrTema';
 import type { Nada } from './wrTema';
-import type { StatusSp, Urgensi } from './sparePartData';
+import type { StatusSp, Urgensi, Entitas } from './sparePartData';
 import { labelSiteDariKey } from './siteLabel';
 
 export const rp = (n: number): string => `Rp ${Math.round(n).toLocaleString('id-ID')}`;
@@ -45,9 +45,12 @@ export function Chip({ nada, teks, title }: { nada: Nada; teks: string; title?: 
   );
 }
 export const ChipStatus = ({ s }: { s: StatusSp }) => <Chip nada={NADA_STATUS[s]} teks={s} title={KETERANGAN_STATUS[s]} />;
-export const ChipEntitas = ({ e }: { e: 'RDA' | 'RCE' }) => (
-  <Chip nada={e === 'RDA' ? NADA.out : NADA.aset} teks={e} title={e === 'RDA' ? 'PT Reethau Dharma Andalan' : 'Reethau Clean Energy'} />
-);
+const CHIP_ENTITAS: Record<Entitas, { nada: Nada; title: string }> = {
+  RDA: { nada: NADA.out, title: 'PT Reethau Dharma Andalan' },
+  RCE: { nada: NADA.aset, title: 'Reethau Clean Energy' },
+  RET: { nada: NADA.warn, title: 'Kode berawalan I-RET' },
+};
+export const ChipEntitas = ({ e }: { e: Entitas }) => <Chip nada={CHIP_ENTITAS[e].nada} teks={e} title={CHIP_ENTITAS[e].title} />;
 
 export function Panel({ judul, baca, aksi, children, tinggi }: {
   judul: string; baca?: string; aksi?: ReactNode; children: ReactNode; tinggi?: number;

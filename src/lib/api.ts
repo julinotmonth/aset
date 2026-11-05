@@ -110,7 +110,35 @@ async function request<T>(path: string, options: RequestInit & OpsiRequest = {})
   }
 }
 
+/** Hasil unduhan berkas (mis. Export Excel). */
+export interface HasilUnduh { blob: Blob; namaFile: string; headers: Headers }
+
+/** Unduh berkas dari backend (butuh token, jadi tidak bisa lewat <a href>). Error JSON dari server dibaca seperti request biasa. */
+async function unduh(path: string, opsi: OpsiRequest = {}): Promise<HasilUnduh> {
+  const { timeoutMs = 120_000 } = opsi;
+  const token = getToken();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: ctl.signal });
+    if (res.status === 401) setToken(null);
+    if (!res.ok) {
+      const body = res.headers.get('content-type')?.includes('application/json') ? await res.json().catch(() => null) as { error?: string } | null : null;
+      throw new ApiError(body?.error || `Permintaan gagal (${res.status})`, res.status);
+    }
+    const disposisi = res.headers.get('content-disposition') || '';
+    const namaFile = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposisi)?.[1] ?? 'unduhan';
+    return { blob: await res.blob(), namaFile: decodeURIComponent(namaFile), headers: res.headers };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(ctl.signal.aborted ? PESAN_TIMEOUT : PESAN_JARINGAN, 0);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const api = {
+  unduh,
   get: <T>(path: string, opsi?: OpsiRequest) => request<T>(path, { ...opsi }),
   post: <T>(path: string, data?: unknown, opsi?: OpsiRequest) => request<T>(path, { method: 'POST', body: data !== undefined ? JSON.stringify(data) : undefined, ...opsi }),
   patch: <T>(path: string, data?: unknown, opsi?: OpsiRequest) => request<T>(path, { method: 'PATCH', body: data !== undefined ? JSON.stringify(data) : undefined, ...opsi }),

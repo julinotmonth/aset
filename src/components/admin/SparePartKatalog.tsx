@@ -1,7 +1,7 @@
 // Tab "Katalog & Pergerakan" di menu Spare Part.
 //
 // Menggabungkan baris Barang Masuk/Keluar dari SEMUA site, lalu hanya memakai yang
-// kodenya diawali I-RDA atau I-RCE. Tiap kode menjadi satu item: total masuk/keluar,
+// kodenya diawali I-RDA, I-RCE, atau I-RET. Tiap kode menjadi satu item: total masuk/keluar,
 // sisa stok, harga rata-rata, laju pemakaian, dan status kecukupan. Klik baris
 // untuk melihat rincian per site, tren harga, dan transaksi terakhir.
 import { Fragment, useEffect, useMemo, useState } from 'react';
@@ -109,6 +109,7 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
     jenis: semua.length,
     rda: semua.filter((i) => i.entitas === 'RDA').length,
     rce: semua.filter((i) => i.entitas === 'RCE').length,
+    ret: semua.filter((i) => i.entitas === 'RET').length,
     nilaiMasuk: semuaP.reduce((t, i) => t + i.nilaiMasuk, 0),
     nilaiKeluar: semuaP.reduce((t, i) => t + i.nilaiKeluar, 0),
     nilaiSaldo: semua.reduce((t, i) => t + i.nilaiSaldo, 0),
@@ -207,8 +208,8 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
           </select>
         </label>
         <div role="group" aria-label="Entitas" style={{ display: 'flex', gap: '.35rem' }}>
-          {(['ALL', 'RDA', 'RCE'] as const).map((e) => (
-            <button key={e} type="button" className="sp2-chip" aria-pressed={entitas === e} onClick={() => setEntitas(e)}>{e === 'ALL' ? 'RDA + RCE' : e}</button>
+          {(['ALL', 'RDA', 'RCE', 'RET'] as const).map((e) => (
+            <button key={e} type="button" className="sp2-chip" aria-pressed={entitas === e} onClick={() => setEntitas(e)}>{e === 'ALL' ? 'RDA + RCE + RET' : e}</button>
           ))}
         </div>
         <div style={{ position: 'relative', flex: '1 1 220px', maxWidth: 340 }}>
@@ -236,7 +237,7 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
       {galat && <div className="glass-panel" style={{ borderRadius: 14, padding: '.7rem 1rem', marginBottom: '1rem', fontSize: '.78rem', color: NADA.neg.teks }}>{galat}</div>}
 
       {!memuat && rows.length === 0 && !galat && (
-        <div className="glass-panel sp2-panel"><div className="sp2-kosong">Belum ada baris dengan kode I-RDA / I-RCE pada Laporan Mingguan.<br />Pastikan sheet tiap site sudah disinkronkan dan kolom Kode terisi.</div></div>
+        <div className="glass-panel sp2-panel"><div className="sp2-kosong">Belum ada baris dengan kode I-RDA / I-RCE / I-RET pada Laporan Mingguan.<br />Pastikan sheet tiap site sudah disinkronkan dan kolom Kode terisi.</div></div>
       )}
       {memuat && rows.length === 0 && <div className="glass-panel sp2-panel"><div className="sp2-kosong"><span style={{ display: 'inline-flex', gap: '.5rem', alignItems: 'center' }}><Loader2 size={16} className="sp2-spin" /> Mengambil data dari semua site…</span></div></div>}
 
@@ -244,7 +245,7 @@ export function SparePartKatalog({ auth, cariAwal }: { auth: AuthState; cariAwal
         <>
           {/* ── Angka kunci ── */}
           <div className="eam-kpis">
-            <KpiKartu ikon={Boxes} warna="#A78BFA" label="Jenis Spare Part" nilai={angka(k.jenis)} sub={`${angka(k.rda)} RDA · ${angka(k.rce)} RCE`} />
+            <KpiKartu ikon={Boxes} warna="#A78BFA" label="Jenis Spare Part" nilai={angka(k.jenis)} sub={`${angka(k.rda)} RDA · ${angka(k.rce)} RCE · ${angka(k.ret)} RET`} />
             <KpiKartu ikon={TrendingUp} warna="#60A5FA" label="Nilai Masuk" nilai={rupiahRingkas(k.nilaiMasuk)} sub="total pembelian / penerimaan" />
             <KpiKartu ikon={TrendingDown} warna="#F59E0B" label="Nilai Keluar" nilai={rupiahRingkas(k.nilaiKeluar)} sub="total pemakaian" />
             <KpiKartu ikon={Wallet} warna="#34D399" label="Nilai Sisa Stok" nilai={rupiahRingkas(k.nilaiSaldo)} sub="sisa stok × harga rata-rata" />

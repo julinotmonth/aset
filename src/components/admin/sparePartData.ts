@@ -2,8 +2,8 @@
 //
 // Sumber: baris Laporan Mingguan (Barang Masuk / Barang Keluar) dari SEMUA site.
 // Yang dihitung sebagai "spare part" hanyalah baris yang kolom Kode-nya diawali
-// "I-RDA" (PT Reethau Dharma Andalan) atau "I-RCE" (Reethau Clean Energy); kode lain
-// (aset, ISO Tank, jasa, dst.) diabaikan.
+// "I-RDA" (PT Reethau Dharma Andalan), "I-RCE" (Reethau Clean Energy), atau "I-RET";
+// kode lain (aset, ISO Tank, jasa, dst.) diabaikan.
 //
 // PENTING — saldo di sini = Σ barang masuk − Σ barang keluar pada data laporan. Stok awal
 // (sebelum data laporan tercatat) tidak ikut, jadi angka ini adalah ESTIMASI pergerakan,
@@ -21,7 +21,7 @@ export interface BarisSp {
   /** true bila harga/nilai tidak tercatat di sheet dan dilengkapi dari harga satuan kode yang sama. */
   estimasi?: boolean;
 }
-export type Entitas = 'RDA' | 'RCE';
+export type Entitas = 'RDA' | 'RCE' | 'RET';
 export type StatusSp = 'Aman' | 'Waspada' | 'Kritis' | 'Tidak Bergerak' | 'Cek Stok';
 
 export interface StatSite {
@@ -46,7 +46,8 @@ export interface ItemSp {
 /** Rapikan kode: huruf besar; spasi / tanda pisah lain menjadi "-". */
 export const normKode = (k: string): string => String(k ?? '').trim().toUpperCase().replace(/[\u2010-\u2015\s]+/g, '-');
 export const entitasDariKode = (k: string): Entitas | null => {
-  const m = /^I-(RDA|RCE)/.exec(normKode(k));
+  // RET: huruf sesudahnya tidak boleh langsung huruf lagi (mis. "I-RETAINER" bukan kode RET).
+  const m = /^I-(RDA|RCE|RET(?![A-Z]))/.exec(normKode(k));
   return m ? (m[1] as Entitas) : null;
 };
 export const adalahSparePart = (k: string): boolean => entitasDariKode(k) !== null;

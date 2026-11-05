@@ -1,7 +1,7 @@
 // Tab "Rekomendasi Transfer" di menu Transfer Antar Site.
 //
 // Mencocokkan site yang KELEBIHAN stok (sisa stok cukup lama / tidak terpakai) dengan site
-// yang KEKURANGAN (pemakaian ada tetapi sisa stok menipis), per kode I-RDA / I-RCE, memakai
+// yang KEKURANGAN (pemakaian ada tetapi sisa stok menipis), per kode I-RDA / I-RCE / I-RET, memakai
 // data Laporan Mingguan semua site. Hasilnya daftar usulan transfer berurutan menurut
 // urgensi; pilih beberapa untuk dijadikan Rencana Transfer lalu ekspor / salin.
 //
@@ -150,7 +150,7 @@ export function TransferRekomendasi({ auth }: { auth: AuthState }) {
       </section>
 
       {memuat && rows.length === 0 && <div className="glass-panel sp2-panel"><div className="sp2-kosong"><span style={{ display: 'inline-flex', gap: '.5rem', alignItems: 'center' }}><Loader2 size={16} className="sp2-spin" /> Mengambil data dari semua site…</span></div></div>}
-      {!memuat && rows.length === 0 && !galat && <div className="glass-panel sp2-panel"><div className="sp2-kosong">Belum ada data spare part (kode I-RDA / I-RCE) pada Laporan Mingguan, jadi belum ada yang bisa dianalisis.</div></div>}
+      {!memuat && rows.length === 0 && !galat && <div className="glass-panel sp2-panel"><div className="sp2-kosong">Belum ada data spare part (kode I-RDA / I-RCE / I-RET) pada Laporan Mingguan, jadi belum ada yang bisa dianalisis.</div></div>}
 
       {rows.length > 0 && (
         <>
