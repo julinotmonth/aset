@@ -11,6 +11,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'rea
 import type { CSSProperties } from 'react';
 import { NADA, SERI, tooltipProps, fmtLegend, fmtLegendPie, WR_CSS, useWrTema } from './wrTema';
 import type { Nada } from './wrTema';
+import { InputBarangPanel } from './InputBarangPanel';
 import {
   URUT_KELAS, tambahKlasifikasi, ringkasKlasifikasi, jenisTakDikenal, nilaiBaris, bandingkanSub,
 } from './asetKlasifikasi';
@@ -21,7 +22,7 @@ import { NADA_KELAS, IKON_KELAS, ikonSub } from './asetKlasifikasiTema';
 type BarisAset = WeeklyRow & Klasifikasi;
 import {
   RefreshCw, Upload, Link2, Download, AlertTriangle, CheckCircle2, Loader2,
-  TrendingDown, TrendingUp, Package, Boxes, X,
+  TrendingDown, TrendingUp, Package, Boxes, X, Plus,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -835,6 +836,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   // Export Barang Masuk / Keluar → Excel dengan template yang SAMA seperti sheet sumber
   // (kolom, urutan, dan isi sel persis sheet; dibangun server dari header + sel asli yang disimpan saat sync).
   const [mengekspor, setMengekspor] = useState(false);
+  const [inputBuka, setInputBuka] = useState(false); // panel Input Manual (Barang Masuk / Keluar)
   const unduhExcel = async () => {
     setMengekspor(true); setPesan(null);
     try {
@@ -982,6 +984,12 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         <input ref={fileRef} type="file" accept=".csv,text/csv" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void unggahCsv(f); }} />
 
+        {arah !== 'ASET' && site !== 'global' && (
+          <button type="button" className="wr-btn" onClick={() => setInputBuka(true)} title={`Tambah ${arah === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} langsung dari website — otomatis masuk ke Google Sheet`}
+            style={{ ...tombol, background: 'var(--ce-green)', color: '#04251a', fontWeight: 700, borderColor: 'transparent' }}>
+            <Plus size={15} /> Input Manual
+          </button>
+        )}
         <button type="button" className="wr-btn" onClick={arah === 'ASET' ? unduhCsv : () => void unduhExcel()} disabled={mengekspor} aria-busy={mengekspor || undefined} style={tombol}
           title={arah === 'ASET' ? 'Unduh daftar aset (CSV)' : 'Unduh Excel dengan template yang sama seperti sheet sumber'}>
           {mengekspor ? <Loader2 size={15} /> : <Download size={15} />} {mengekspor ? 'Menyiapkan…' : 'Export'}
@@ -1517,6 +1525,10 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         </>
       )}
       </>
+      )}
+      {arah !== 'ASET' && site !== 'global' && (
+        <InputBarangPanel buka={inputBuka} site={site} siteLabel={labelPenuh(labelSite)} arah={arah} entitasAwal={entitas || undefined}
+          onTutup={() => setInputBuka(false)} onTersimpan={() => void muatData(true)} />
       )}
     </>
 

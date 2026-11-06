@@ -21,9 +21,12 @@ export function setToken(token: string | null): void {
 
 class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** Isi JSON error dari server (mis. `galatField` / `konflik` pada form input). */
+  data?: Record<string, unknown>;
+  constructor(message: string, status: number, data?: Record<string, unknown>) {
     super(message);
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -101,7 +104,7 @@ async function request<T>(path: string, options: RequestInit & OpsiRequest = {})
       }
       if (res.status === 204) return undefined as T;
       if (!res.ok) {
-        throw new ApiError(body?.error || (gateway ? `Server sedang tidak tersedia (HTTP ${res.status}). Coba lagi sebentar lagi.` : `Permintaan gagal (${res.status})`), res.status);
+        throw new ApiError(body?.error || (gateway ? `Server sedang tidak tersedia (HTTP ${res.status}). Coba lagi sebentar lagi.` : `Permintaan gagal (${res.status})`), res.status, (body ?? undefined) as Record<string, unknown> | undefined);
       }
       return body as T;
     }
