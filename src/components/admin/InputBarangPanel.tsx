@@ -1,15 +1,15 @@
-// Input manual Barang Masuk / Barang Keluar lewat website.
+// Pencatatan transaksi Barang Masuk / Barang Keluar lewat website (menu "Tambah Transaksi").
 //
 // Form dibangun dari TEMPLATE sheet sumber: tiap kolom header tab (mis. IN_RDA) menjadi kolom form, lengkap dengan
 // kontrol yang sesuai (tanggal, pencarian kode/nama, angka, satuan, supplier/alokasi, dst.). Server memvalidasi ulang,
 // menyimpan ke aplikasi, lalu menulis baris baru ke Google Spreadsheet (lihat server/src/weeklyInput.js).
-// Alur 3 langkah — Isi → Periksa → Selesai — supaya kesalahan ketik tertangkap sebelum masuk ke sheet.
+// Alur 3 langkah — Isi Data → Tinjau → Selesai — supaya kesalahan ketik tertangkap sebelum masuk ke sheet.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { X, Plus, CheckCircle2, AlertTriangle, Cloud, CloudOff, Loader2, RefreshCw, ArrowLeft, Send, Info } from 'lucide-react';
+import { X, Plus, Minus, CheckCircle2, AlertTriangle, Cloud, CloudOff, Loader2, RefreshCw, ArrowLeft, Send, Info, PackagePlus, PackageMinus, ChevronDown, Check } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import './formModal.css';
-import './inputManual.css';
+import './inputTransaksi.css';
 
 // ── Tipe (sama dengan GET /weekly-reports/input/config) ────────────────────────────
 interface KolomInput { idx: number; judul: string; field: string | null; jenis: 'tanggal' | 'angka' | 'bilbul' | 'teks'; wajib: boolean; auto: boolean; rumus: boolean }
@@ -42,6 +42,10 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const isoLokal = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const geserHari = (iso: string, h: number) => { const d = new Date(`${iso}T00:00:00`); d.setDate(d.getDate() + h); return isoLokal(d); };
 const tglPendek = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${Number(iso.slice(8))} ${BLN[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : iso);
+/** Ket WR. terisi otomatis dari No. WR: "Done <no WR>". Kosong bila No. WR belum diisi. Ubah rumusnya di sini bila format berbeda. */
+const ketWrOtomatis = (noWr: string) => (noWr.trim() ? `Done ${noWr.trim()}` : '');
+const adalahKetWr = (k: KolomInput) => k.field === 'keterangan' && /^ket\.?\s*wr\b/i.test(k.judul.trim());
+const adalahNoWr = (k: KolomInput) => /^no\.?\s*wr\b/i.test(k.judul.trim());
 const kunciKolom = (k: KolomInput) => k.field ?? `x:${k.judul.toLowerCase().replace(/[^a-z0-9]+/g, '')}`;
 
 /** Minggu ISO (Senin = awal minggu) — penomoran yang sama dengan kolom Minggu pada sheet sumber. */
@@ -128,6 +132,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
   const [tab, setTab] = useState('');
   const [nilai, setNilai] = useState<Record<string, string>>({ tanggal: hariIni });
   const [totalManual, setTotalManual] = useState(false);
+  const [ketWrManual, setKetWrManual] = useState(false); // true = pengguna mengetik sendiri Ket WR (tidak ikut No. WR)
   const [sentuh, setSentuh] = useState<Set<string>>(new Set());
   const [coba, setCoba] = useState(false);
   const [galatServer, setGalatServer] = useState<Record<string, string>>({});
@@ -139,16 +144,19 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
   const [galatUmum, setGalatUmum] = useState('');
   const [riwayat, setRiwayat] = useState<ItemRiwayat[]>([]);
   const [mengirimUlang, setMengirimUlang] = useState('');
+  const [emailDisalin, setEmailDisalin] = useState(false);
+  const [statusBuka, setStatusBuka] = useState(false); // detail status koneksi sheet (ringkas secara default)
   const badanRef = useRef<HTMLDivElement>(null);
   // Entitas halaman dibaca lewat ref: perubahannya (mis. setelah halaman memuat ulang data) tidak boleh mengulang pemuatan / mereset form.
   const entitasRef = useRef(entitasAwal);
   entitasRef.current = entitasAwal;
 
   const namaArah = arah === 'IN' ? 'Barang Masuk' : 'Barang Keluar';
+  const IkonArah = arah === 'IN' ? PackagePlus : PackageMinus;
 
   const kosongkan = useCallback((pertahankan: boolean) => {
     setNilai((n): Record<string, string> => (pertahankan ? { tanggal: n.tanggal || hariIni, alokasi: n.alokasi || '', pic: n.pic || '' } : { tanggal: hariIni }));
-    setTotalManual(false); setSentuh(new Set()); setCoba(false); setGalatServer({}); setKonflik(null); setAbaikan([]); setGalatUmum(''); setHasil(null);
+    setTotalManual(false); setKetWrManual(false); setSentuh(new Set()); setCoba(false); setGalatServer({}); setKonflik(null); setAbaikan([]); setGalatUmum(''); setHasil(null);
   }, [hariIni]);
 
   const muatKonfig = useCallback(async (senyap = false) => {
@@ -174,19 +182,32 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
 
   useEffect(() => {
     if (!buka) return;
-    setTahap('isi'); setKonfig(null); setTab(''); kosongkan(false);
+    setStatusBuka(false); setTahap('isi'); setKonfig(null); setTab(''); kosongkan(false);
     void muatKonfig(); void muatRiwayat();
   }, [buka, site, arah, muatKonfig, muatRiwayat, kosongkan]);
 
   const tabObj = konfig?.tabs.find((t) => t.tab === tab) ?? null;
+
+  // Kursor langsung ke kolom pencarian barang begitu form siap — tidak perlu klik dulu.
+  const siap = !!tabObj && !memuat;
+  useEffect(() => {
+    if (!buka || !siap || tahap !== 'isi') return;
+    const t = setTimeout(() => document.getElementById('im-f-namaBarang')?.focus(), 80);
+    return () => clearTimeout(t);
+  }, [buka, siap, tahap]);
   const kolomForm = useMemo(() => (tabObj?.kolom ?? []).filter((k) => !k.auto), [tabObj]);
 
   // Total = jumlah × harga (otomatis, kecuali pengguna mengetik sendiri).
+  const kolomKetWr = useMemo(() => tabObj?.kolom.find((k) => !k.auto && !k.rumus && adalahKetWr(k)) ?? null, [tabObj]);
+  const kolomNoWr = useMemo(() => tabObj?.kolom.find((k) => !k.auto && !k.rumus && adalahNoWr(k)) ?? null, [tabObj]);
+  const ketWrAktif = !!kolomKetWr && !!kolomNoWr; // fitur otomatis hanya bila tab punya kolom "Ket WR." dan "No. WR"
   const efektif = useMemo((): Record<string, string> => {
     const j = bacaAngka(nilai.jumlah ?? ''), h = bacaAngka(nilai.harga ?? '');
     const otomatis = j !== null && j > 0 && h !== null && h >= 0 ? Math.round(j * h * 100) / 100 : null;
-    return { ...nilai, totalHarga: totalManual ? (nilai.totalHarga ?? '') : otomatis !== null ? fmtAngka(otomatis) : '' };
-  }, [nilai, totalManual]);
+    const hasil: Record<string, string> = { ...nilai, totalHarga: totalManual ? (nilai.totalHarga ?? '') : otomatis !== null ? fmtAngka(otomatis) : '' };
+    if (ketWrAktif && !ketWrManual) hasil[kunciKolom(kolomKetWr!)] = ketWrOtomatis(nilai[kunciKolom(kolomNoWr!)] ?? '');
+    return hasil;
+  }, [nilai, totalManual, ketWrAktif, ketWrManual, kolomKetWr, kolomNoWr]);
 
   const tglIso = efektif.tanggal || '';
   const tglValid = /^\d{4}-\d{2}-\d{2}$/.test(tglIso);
@@ -313,7 +334,25 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       if (tahap === 'isi') lanjutPeriksa(); else if (tahap === 'periksa' && !menyimpan) void simpan();
+      return;
     }
+    // Enter di sebuah kolom = pindah ke kolom berikutnya; di kolom terakhir = lanjut meninjau.
+    const el = e.target as HTMLElement;
+    if (e.key === 'Enter' && !e.defaultPrevented && tahap === 'isi' && el.tagName === 'INPUT') {
+      const semua = Array.from(badanRef.current?.querySelectorAll<HTMLInputElement>('input:not([disabled]):not([readonly])') ?? []);
+      const i = semua.indexOf(el as HTMLInputElement);
+      if (i >= 0) { e.preventDefault(); if (i < semua.length - 1) semua[i + 1].focus(); else lanjutPeriksa(); }
+    }
+  };
+
+  const salinEmail = async (email: string) => {
+    try { await navigator.clipboard.writeText(email); setEmailDisalin(true); setTimeout(() => setEmailDisalin(false), 1800); } catch { /* clipboard tidak tersedia */ }
+  };
+
+  const geserAngka = (key: string, d: number) => {
+    const n = bacaAngka(nilai[key] ?? '') ?? 0;
+    ubah(key, fmtAngka(Math.max(0, Math.round((n + d) * 1000) / 1000), 3));
+    sentuhi(key);
   };
 
   if (!buka) return null;
@@ -325,10 +364,13 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
     const val = efektif[key] ?? '';
     const err = galatTampil(key);
     const id = `im-f-${key}`;
-    const penuh = k.field === 'namaBarang' || k.field === 'keterangan' || k.field === 'statusSmr';
+    const penuh = k.field === 'namaBarang' || k.field === 'jumlah' || k.field === 'keterangan' || k.field === 'statusSmr';
     const label = (
       <div className="im-lbl">
         <label htmlFor={id}>{k.judul}{k.wajib && <span className="wajib" aria-hidden="true">*</span>}</label>
+        {ketWrAktif && k === kolomKetWr && (ketWrManual
+          ? <button type="button" className="im-chip" onClick={() => setKetWrManual(false)}>↺ isi otomatis dari No. WR</button>
+          : <span className="auto">otomatis dari No. WR</span>)}
         {k.field === 'totalHarga' && !k.rumus && (totalManual
           ? <button type="button" className="im-chip" onClick={() => setTotalManual(false)}>↺ hitung otomatis</button>
           : <span className="auto">otomatis</span>)}
@@ -352,11 +394,24 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
       kontrol = <KotakCari id={id} nilai={val} onUbah={(v) => ubah(key, v)} opsi={konfig?.katalog ?? []} onPilih={pilihBarang} placeholder="mis. I-RDA-00294" invalid={!!err} mode="kode" />;
     } else if (k.field === 'namaBarang') {
       kontrol = <KotakCari id={id} nilai={val} onUbah={(v) => ubah(key, v)} opsi={konfig?.katalog ?? []} onPilih={pilihBarang} placeholder="Ketik nama atau kode — saran muncul dari barang yang sudah ada" invalid={!!err} mode="nama" />;
+    } else if (k.field === 'jumlah') {
+      kontrol = (
+        <div className="im-stepper">
+          <button type="button" className="im-step-btn" aria-label="Kurangi jumlah" onClick={() => geserAngka(key, -1)} tabIndex={-1}><Minus size={16} /></button>
+          <div className="im-satuan">
+            <input id={id} className="fm-input im-angka" inputMode="decimal" autoComplete="off" value={val} placeholder="0"
+              style={efektif.satuan ? { paddingRight: '4.2rem' } : undefined}
+              onChange={(e) => ubah(key, e.target.value)} onBlur={() => rapikanAngka(key)} aria-invalid={!!err || undefined} />
+            {efektif.satuan && <span className="im-akhiran">{efektif.satuan}</span>}
+          </div>
+          <button type="button" className="im-step-btn" aria-label="Tambah jumlah" onClick={() => geserAngka(key, 1)} tabIndex={-1}><Plus size={16} /></button>
+        </div>
+      );
     } else if (k.jenis === 'angka') {
       kontrol = (
         <div className="im-satuan">
-          <input id={id} className="fm-input im-angka" inputMode="decimal" autoComplete="off" value={val} placeholder={k.field === 'jumlah' ? '0' : '0'}
-            style={k.field === 'jumlah' && efektif.satuan ? { paddingRight: '4.2rem' } : undefined}
+          <input id={id} className="fm-input im-angka" inputMode="decimal" autoComplete="off" value={val} placeholder="0"
+            style={k.field === 'harga' || k.field === 'totalHarga' ? { paddingRight: '2.6rem' } : undefined}
             onChange={(e) => { if (k.field === 'totalHarga') setTotalManual(true); ubah(key, e.target.value); }}
             onBlur={() => rapikanAngka(key)} aria-invalid={!!err || undefined} />
           {k.field === 'jumlah' && efektif.satuan && <span className="im-akhiran">{efektif.satuan}</span>}
@@ -385,7 +440,9 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
         </>
       );
     } else {
-      kontrol = <input id={id} className="fm-input" value={val} autoComplete="off" list={k.field === 'pic' ? 'im-dl-pic' : undefined} onChange={(e) => ubah(key, e.target.value)} onBlur={() => sentuhi(key)} aria-invalid={!!err || undefined} />;
+      kontrol = <input id={id} className="fm-input" value={val} autoComplete="off" list={k.field === 'pic' ? 'im-dl-pic' : undefined}
+        placeholder={ketWrAktif && k === kolomKetWr ? 'Terisi otomatis setelah No. WR diisi' : undefined}
+        onChange={(e) => { if (ketWrAktif && k === kolomKetWr) setKetWrManual(e.target.value !== ''); ubah(key, e.target.value); }} onBlur={() => sentuhi(key)} aria-invalid={!!err || undefined} />;
     }
     return (
       <div key={key} className={`im-field${penuh ? ' im-full' : ''}${err ? ' salah' : ''}${k.rumus ? ' rumus' : ''}`}>
@@ -393,7 +450,6 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
         {kontrol}
         {err && <div className="im-pesan-salah" role="alert">{err}</div>}
         {k.field === 'tanggal' && tglValid && !err && <div className="im-info">Minggu {mingguIso(tglIso)} · {BLN[Number(tglIso.slice(5, 7)) - 1]} {tglIso.slice(0, 4)} — Minggu, Bulan, dan Tahun terisi otomatis.</div>}
-        {k.field === 'kode' && itemDipilih && !err && <div className="im-info">{itemDipilih.nama} · saldo tercatat {fmtAngka(itemDipilih.saldo)} {itemDipilih.satuan}</div>}
       </div>
     );
   };
@@ -414,25 +470,68 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
   });
 
   const statusKoneksi = !konfig ? null : konfig.tersambung
-    ? { kelas: 'ok', ikon: <Cloud size={16} />, teks: <><b>Terhubung ke Google Sheet.</b> Data yang disimpan langsung menjadi baris baru di sheet, dan perubahan di sheet masuk ke website lewat sinkron otomatis.</> }
+    ? { kelas: 'ok', ikon: <Cloud size={16} />, ringkas: 'Terhubung ke Google Sheet', teks: <>Data yang disimpan langsung menjadi baris baru di sheet, dan perubahan di sheet masuk ke website lewat sinkron otomatis.</> }
     : !konfig.sheetDiatur
-      ? { kelas: 'warn', ikon: <CloudOff size={16} />, teks: <><b>Sumber Sheet untuk {siteLabel} belum diatur.</b> Data tersimpan di aplikasi dulu dan baru masuk ke sheet setelah sumbernya diatur.</> }
-      : { kelas: 'warn', ikon: <CloudOff size={16} />, teks: <><b>Server belum bisa menulis ke Google Sheet.</b> Data tetap tersimpan di aplikasi dan otomatis dikirim begitu koneksi diaktifkan (admin: pasang akun layanan Google dan bagikan sheet sebagai Editor).</> };
+      ? { kelas: 'warn', ikon: <CloudOff size={16} />, ringkas: `Sumber Sheet ${siteLabel} belum diatur — data disimpan di aplikasi dulu`, teks: <>Data tersimpan di aplikasi dan baru masuk ke sheet setelah sumbernya diatur lewat tombol <b>Sumber Sheet</b>.</> }
+      : { kelas: 'warn', ikon: <CloudOff size={16} />, ringkas: 'Belum tersambung ke Google Sheet — data disimpan di aplikasi dulu', teks: <>Data tetap tersimpan di aplikasi dan otomatis dikirim begitu koneksi diaktifkan (admin: pasang akun layanan Google dan bagikan sheet sebagai Editor).</> };
+
+  // ── Pengelompokan kolom agar form terbaca per bagian ───────────────────────
+  const URUT_BARANG = ['namaBarang', 'kode', 'satuan', 'jumlah'];
+  const kolomUrut = (daftar: KolomInput[], urut: string[]) => [...daftar].sort((a, b) => {
+    const ia = urut.indexOf(a.field ?? ''), ib = urut.indexOf(b.field ?? '');
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const bagian = [
+    { id: 'waktu', judul: 'Waktu', kolom: kolomForm.filter((k) => k.field === 'tanggal') },
+    { id: 'barang', judul: 'Barang', kolom: kolomUrut(kolomForm.filter((k) => ['kode', 'namaBarang', 'jumlah', 'satuan'].includes(k.field ?? '')), URUT_BARANG) },
+    { id: 'nilai', judul: 'Nilai', kolom: kolomForm.filter((k) => k.field === 'harga' || k.field === 'totalHarga') },
+    { id: 'ref', judul: arah === 'IN' ? 'Supplier & keterangan' : 'Alokasi & keterangan', kolom: kolomForm.filter((k) => !['tanggal', 'kode', 'namaBarang', 'jumlah', 'satuan', 'harga', 'totalHarga'].includes(k.field ?? '')).sort((a, b) => Number(adalahKetWr(a)) - Number(adalahKetWr(b))) },
+  ].filter((b) => b.kolom.length > 0);
+
+  // Kartu ringkas barang terpilih: saldo tercatat dan perkiraan saldo setelah transaksi ini.
+  const jmlNum = bacaAngka(efektif.jumlah ?? '');
+  const saldoTahu = itemDipilih && itemDipilih.saldo >= 0;
+  const sisaSaldo = itemDipilih && saldoTahu && jmlNum !== null && jmlNum > 0 ? itemDipilih.saldo + (arah === 'OUT' ? -jmlNum : jmlNum) : null;
+  const kartuBarang = itemDipilih ? (
+    <div className={`im-item${sisaSaldo !== null && sisaSaldo < 0 ? ' neg' : ''}`} aria-live="polite">
+      <div className="im-item-a">
+        <b>{itemDipilih.nama}</b>
+        <span>{itemDipilih.kode}{saldoTahu ? ` · saldo tercatat ${fmtAngka(itemDipilih.saldo)} ${itemDipilih.satuan}` : ''}</span>
+      </div>
+      {sisaSaldo !== null && (
+        <div className="im-item-b">
+          <small>Saldo setelah {arah === 'OUT' ? 'keluar' : 'masuk'}</small>
+          <b>{fmtAngka(sisaSaldo)} {itemDipilih.satuan}</b>
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  // Daftar kolom yang masih perlu dilengkapi — ditampilkan di bilah bawah, klik untuk melompat ke kolomnya.
+  const perluDiisi = (tabObj?.kolom ?? []).filter((k) => !k.auto && !k.rumus && galat[kunciKolom(k)]);
+  const langkah: Array<['isi' | 'periksa' | 'selesai', string]> = [['isi', 'Isi data'], ['periksa', 'Tinjau'], ['selesai', 'Selesai']];
+  const urutTahap = { isi: 0, periksa: 1, selesai: 2 }[tahap];
 
   return (
     <div className="im-overlay" onClick={(e) => { if (e.target === e.currentTarget) tutup(); }}>
-      <div className="im-panel" role="dialog" aria-modal="true" aria-label={`Input ${namaArah}`} onKeyDown={tombolKey}>
+      <div className="im-panel" role="dialog" aria-modal="true" aria-label={`Catat ${namaArah}`} onKeyDown={tombolKey}>
         <div className="im-head">
-          <div className="im-head-ico"><Plus size={22} /></div>
+          <div className="im-head-ico"><IkonArah size={22} /></div>
           <div style={{ minWidth: 0 }}>
-            <h3 className="im-title">Input {namaArah}</h3>
-            <div className="im-sub">{siteLabel} · mengikuti template sheet sumber</div>
+            <h3 className="im-title">Catat {namaArah}</h3>
+            <div className="im-sub">{siteLabel} · kolom mengikuti template Google Sheet</div>
           </div>
           <button type="button" className="fm-close" onClick={tutup} aria-label="Tutup"><X size={18} /></button>
         </div>
-        <div className="im-langkah" aria-hidden="true">
-          <span className="on" /><span className={tahap !== 'isi' ? 'on' : ''} /><span className={tahap === 'selesai' ? 'on' : ''} />
-        </div>
+        <ol className="im-steps" aria-label="Langkah pencatatan">
+          {langkah.map(([k, t], i) => (
+            <li key={k} className={i < urutTahap ? 'done' : i === urutTahap ? 'now' : ''} aria-current={i === urutTahap ? 'step' : undefined}>
+              {k === 'isi' && tahap === 'periksa'
+                ? <button type="button" className="im-step-link" onClick={() => { setTahap('isi'); setKonflik(null); }} disabled={menyimpan}><span className="im-step-no">{i < urutTahap ? <Check size={12} /> : i + 1}</span>{t}</button>
+                : <span className="im-step-link"><span className="im-step-no">{i < urutTahap ? <Check size={12} /> : i + 1}</span>{t}</span>}
+            </li>
+          ))}
+        </ol>
 
         <div className="im-body" ref={badanRef}>
           {memuat && <div className="im-muat"><Loader2 size={18} className="im-putar" /> Memuat template sheet…</div>}
@@ -440,7 +539,27 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
 
           {konfig && !memuat && (
             <>
-              {statusKoneksi && tahap !== 'selesai' && <div className={`im-status ${statusKoneksi.kelas}`}>{statusKoneksi.ikon}<div>{statusKoneksi.teks}</div></div>}
+              {statusKoneksi && tahap !== 'selesai' && (
+                <div className={`im-status im-status--ringkas ${statusKoneksi.kelas}`}>
+                  {statusKoneksi.ikon}
+                  <div className="im-status-t"><b>{statusKoneksi.ringkas}</b></div>
+                  <button type="button" className="im-link" aria-expanded={statusBuka} onClick={() => setStatusBuka((v) => !v)}>
+                    {statusBuka ? 'Tutup' : 'Detail'} <ChevronDown size={14} style={{ transform: statusBuka ? 'rotate(180deg)' : undefined }} />
+                  </button>
+                  {statusBuka && (
+                    <div className="im-status-d">
+                      {statusKoneksi.teks}
+                      {konfig.emailLayanan
+                        ? <div className="im-email">
+                            <span>Bagikan sheet sebagai <b>Editor</b> ke:</span>
+                            <code>{konfig.emailLayanan}</code>
+                            <button type="button" className="im-chip" onClick={() => void salinEmail(konfig.emailLayanan!)}>{emailDisalin ? 'Tersalin ✓' : 'Salin'}</button>
+                          </div>
+                        : <div className="im-email"><span>Server belum punya akun layanan. Isi variabel <code>GOOGLE_SERVICE_ACCOUNT_B64</code> di hosting backend lalu deploy ulang.</span></div>}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {konfig.tabs.length === 0 && (
                 <div className="im-status warn"><AlertTriangle size={16} /><div><b>Template sheet belum tersinkron.</b> Klik “Sync Sekarang” di halaman Laporan supaya form bisa mengikuti kolom sheet {siteLabel}, lalu buka lagi panel ini.</div></div>
@@ -450,7 +569,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                 <>
                   {konfig.tabs.length > 1 && (
                     <div>
-                      <span className="im-lbl">Masuk ke tab</span>
+                      <span className="im-lbl">Tab tujuan di sheet</span>
                       <div className="im-tabs" role="group" aria-label="Tab tujuan">
                         {konfig.tabs.map((t) => (
                           <button key={t.tab} type="button" className="im-tab" aria-pressed={t.tab === tab} onClick={() => { setTab(t.tab); setKonflik(null); setAbaikan([]); }}>
@@ -461,7 +580,13 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                     </div>
                   )}
                   {galatUmum && <div className="fm-error" role="alert">{galatUmum}</div>}
-                  <div className="im-grid">{kolomForm.map(renderKolom)}</div>
+                  {bagian.map((b) => (
+                    <section key={b.id} className="im-sec" aria-label={b.judul}>
+                      <h4 className="im-sec-t">{b.judul}</h4>
+                      <div className="im-grid">{b.kolom.map(renderKolom)}</div>
+                      {b.id === 'barang' && kartuBarang}
+                    </section>
+                  ))}
                   {peringatan.length > 0 && <div className="im-peringatan" role="status">{peringatan.map((p) => <p key={p}><AlertTriangle size={15} />{p}</p>)}</div>}
                   <datalist id="im-dl-satuan">{[...(konfig.saran.satuan)].map((s) => <option key={s} value={s} />)}</datalist>
                   <datalist id="im-dl-alokasi">{konfig.saran.alokasi.map((s) => <option key={s} value={s} />)}</datalist>
@@ -472,7 +597,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
 
               {tabObj && tahap === 'periksa' && (
                 <>
-                  <div className="im-status ok"><Info size={16} /><div>Periksa sekali lagi. Ini yang akan ditambahkan sebagai <b>baris baru</b> di tab <b>{tabObj.tab}</b>{konfig.tersambung ? ' pada Google Sheet' : ''}.</div></div>
+                  <div className="im-status ok"><Info size={16} /><div>Tinjau sekali lagi. Ini yang akan ditambahkan sebagai <b>baris baru</b> di tab <b>{tabObj.tab}</b>{konfig.tersambung ? ' pada Google Sheet' : ''}.</div></div>
                   <div className="im-pratinjau">
                     <table><tbody>
                       {barisPratinjau.map(({ k, tampil, otomatis }) => (
@@ -486,7 +611,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                       <h4>{konflik.jenis === 'duplikat' ? 'Kemungkinan input ganda' : 'Periksa tab tujuan'}</h4>
                       <p>{konflik.pesan}</p>
                       <div className="baris">
-                        <button type="button" className="im-btn-sec" onClick={() => { setKonflik(null); setTahap('isi'); }}>Periksa lagi</button>
+                        <button type="button" className="im-btn-sec" onClick={() => { setKonflik(null); setTahap('isi'); }}>Ubah data</button>
                         <button type="button" className="btn-primary" disabled={menyimpan} onClick={() => void simpan([konflik.jenis])}>Tetap simpan</button>
                       </div>
                     </div>
@@ -501,7 +626,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                   <h4>{hasil.status === 'ok' ? 'Tersimpan' : hasil.status === 'pending' ? 'Tersimpan di aplikasi, menunggu dikirim ke sheet' : 'Tersimpan di aplikasi, belum masuk ke sheet'}</h4>
                   <p>{hasil.pesan}</p>
                   <div className="baris">
-                    <button type="button" className="btn-primary" onClick={() => { kosongkan(true); setTahap('isi'); setTimeout(() => document.getElementById('im-f-kode')?.focus(), 60); }}><Plus size={16} /> Input lagi</button>
+                    <button type="button" className="btn-primary" onClick={() => { kosongkan(true); setTahap('isi'); setTimeout(() => document.getElementById('im-f-kode')?.focus(), 60); }}><Plus size={16} /> Catat lagi</button>
                     <button type="button" className="im-btn-sec" onClick={onTutup}>Selesai</button>
                     {hasil.status === 'gagal' && <button type="button" className="im-btn-sec" disabled={mengirimUlang === hasil.id} onClick={() => void kirimUlang(hasil.id)}><RefreshCw size={14} /> Kirim ulang</button>}
                   </div>
@@ -509,8 +634,8 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
               )}
 
               {riwayat.length > 0 && (
-                <div className="im-riwayat">
-                  <h4>Input terbaru</h4>
+                <details className="im-riwayat" open={tahap === 'selesai' || undefined}>
+                  <summary>Catatan terbaru <span className="im-hitung">{riwayat.length}</span></summary>
                   <ul>
                     {riwayat.slice(0, tahap === 'selesai' ? 8 : 4).map((r) => (
                       <li key={r.id} title={r.error || undefined}>
@@ -520,7 +645,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                       </li>
                     ))}
                   </ul>
-                </div>
+                </details>
               )}
             </>
           )}
@@ -528,20 +653,29 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
 
         {tabObj && tahap !== 'selesai' && (
           <div className="im-foot">
-            <span className="im-bantu">Ctrl + Enter untuk lanjut</span>
             {tahap === 'isi' ? (
-              <>
-                <button type="button" className="im-btn-sec" onClick={tutup}>Batal</button>
-                <button type="button" className="btn-primary" onClick={lanjutPeriksa}><Send size={16} /> Periksa</button>
-              </>
-            ) : (
-              <>
-                <button type="button" className="im-btn-sec" onClick={() => { setTahap('isi'); setKonflik(null); }} disabled={menyimpan}><ArrowLeft size={16} /> Ubah</button>
-                <button type="button" className="btn-primary" disabled={menyimpan || !!konflik} onClick={() => void simpan()}>
-                  {menyimpan ? <><Loader2 size={16} className="im-putar" /> Menyimpan…</> : <><Send size={16} /> {konfig?.tersambung ? 'Simpan ke Sheet' : 'Simpan'}</>}
-                </button>
-              </>
-            )}
+              perluDiisi.length === 0
+                ? <div className="im-ready ok"><CheckCircle2 size={15} /> Data lengkap — siap ditinjau</div>
+                : <button type="button" className="im-ready warn" onClick={() => { setCoba(true); document.getElementById(`im-f-${kunciKolom(perluDiisi[0])}`)?.focus(); }}>
+                    <AlertTriangle size={15} /> {perluDiisi.length} kolom perlu dilengkapi: {perluDiisi.slice(0, 3).map((k) => k.judul).join(', ')}{perluDiisi.length > 3 ? '…' : ''}
+                  </button>
+            ) : <div className="im-ready ok"><Info size={15} /> Pastikan data sudah benar sebelum disimpan</div>}
+            <div className="im-foot-aksi">
+              {tahap === 'isi' ? (
+                <>
+                  <button type="button" className="btn-primary" onClick={lanjutPeriksa} title="Ctrl + Enter"><Send size={16} /> Tinjau Data</button>
+                  <button type="button" className="im-btn-sec" onClick={tutup}>Batal</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="btn-primary" disabled={menyimpan || !!konflik} onClick={() => void simpan()} title="Ctrl + Enter">
+                    {menyimpan ? <><Loader2 size={16} className="im-putar" /> Menyimpan…</> : <><Send size={16} /> {konfig?.tersambung ? 'Simpan ke Sheet' : 'Simpan'}</>}
+                  </button>
+                  <button type="button" className="im-btn-sec" onClick={() => { setTahap('isi'); setKonflik(null); }} disabled={menyimpan}><ArrowLeft size={16} /> Ubah</button>
+                </>
+              )}
+              <span className="im-bantu"><kbd>Enter</kbd> kolom berikutnya · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> lanjut</span>
+            </div>
           </div>
         )}
       </div>
