@@ -4,9 +4,10 @@
 // kontrol yang sesuai (tanggal, pencarian kode/nama, angka, satuan, supplier/alokasi, dst.). Server memvalidasi ulang,
 // menyimpan ke aplikasi, lalu menulis baris baru ke Google Spreadsheet (lihat server/src/weeklyInput.js).
 // Alur 3 langkah — Isi Data → Tinjau → Selesai — supaya kesalahan ketik tertangkap sebelum masuk ke sheet.
+// Panel yang sama dipakai untuk UBAH baris yang sudah ada (prop `edit`, tinjauan "sebelum → sesudah") dan SALIN baris (prop `salin`).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { X, Plus, Minus, CheckCircle2, AlertTriangle, Cloud, CloudOff, Loader2, RefreshCw, ArrowLeft, Send, Info, PackagePlus, PackageMinus, ChevronDown, Check } from 'lucide-react';
+import { X, Plus, Minus, CheckCircle2, AlertTriangle, Cloud, CloudOff, Loader2, RefreshCw, ArrowLeft, Send, Info, PackagePlus, PackageMinus, ChevronDown, Check, Pencil, Copy, BookOpen } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import './formModal.css';
 import './inputTransaksi.css';
@@ -22,6 +23,9 @@ interface KonfigInput {
 interface HasilSimpan { ok: boolean; id: string; status: 'ok' | 'pending' | 'gagal'; barisSheet?: number; pesan: string; tersambung: boolean }
 interface ItemRiwayat { id: string; tab: string; tanggal: string | null; kode: string; nama: string; jumlah: number; satuan: string; status: 'ok' | 'pending' | 'gagal'; barisSheet: number | null; error: string; oleh: string; waktu: string }
 
+/** Baris yang dibuka dari panel Kelola Data. `nilai` = isian per indeks kolom sheet (dari server). */
+export interface BarisKelola { id: string; tab: string; nama: string; nilai: Record<string, string | number> }
+
 interface Props {
   buka: boolean;
   site: string;
@@ -32,6 +36,12 @@ interface Props {
   onTutup: () => void;
   /** Dipanggil setelah data tersimpan, supaya halaman memuat ulang datanya. */
   onTersimpan: () => void;
+  /** Mode UBAH: baris yang diedit (tab dikunci, simpan memakai PATCH). */
+  edit?: BarisKelola | null;
+  /** Mode SALIN: isian baris ini dipakai sebagai awal catatan BARU. */
+  salin?: BarisKelola | null;
+  /** Membuka panduan "Sambungkan Google Sheet". */
+  onBukaPanduan?: () => void;
 }
 
 // ── Util ───────────────────────────────────────────────────────────────────
@@ -124,7 +134,7 @@ const Lencana = ({ s }: { s: 'ok' | 'pending' | 'gagal' }) => (
 );
 
 // ── Panel ────────────────────────────────────────────────────────────────
-export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onTutup, onTersimpan }: Props) {
+export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onTutup, onTersimpan, edit = null, salin = null, onBukaPanduan }: Props) {
   const hariIni = isoLokal(new Date());
   const [konfig, setKonfig] = useState<KonfigInput | null>(null);
   const [memuat, setMemuat] = useState(false);
@@ -146,13 +156,18 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
   const [mengirimUlang, setMengirimUlang] = useState('');
   const [emailDisalin, setEmailDisalin] = useState(false);
   const [statusBuka, setStatusBuka] = useState(false); // detail status koneksi sheet (ringkas secara default)
+  const [asli, setAsli] = useState<Record<string, string>>({}); // nilai awal baris yang diubah (untuk tinjauan sebelum → sesudah)
+  const [perluPanduan, setPerluPanduan] = useState(false);
+  const terisiRef = useRef('');
+  const sumber = edit ?? salin;
   const badanRef = useRef<HTMLDivElement>(null);
   // Entitas halaman dibaca lewat ref: perubahannya (mis. setelah halaman memuat ulang data) tidak boleh mengulang pemuatan / mereset form.
   const entitasRef = useRef(entitasAwal);
   entitasRef.current = entitasAwal;
 
   const namaArah = arah === 'IN' ? 'Barang Masuk' : 'Barang Keluar';
-  const IkonArah = arah === 'IN' ? PackagePlus : PackageMinus;
+  const IkonArah = edit ? Pencil : salin ? Copy : arah === 'IN' ? PackagePlus : PackageMinus;
+  const judulMode = edit ? 'Ubah' : salin ? 'Salin' : 'Catat';
 
   const kosongkan = useCallback((pertahankan: boolean) => {
     setNilai((n): Record<string, string> => (pertahankan ? { tanggal: n.tanggal || hariIni, alokasi: n.alokasi || '', pic: n.pic || '' } : { tanggal: hariIni }));
@@ -183,10 +198,38 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
   useEffect(() => {
     if (!buka) return;
     setStatusBuka(false); setTahap('isi'); setKonfig(null); setTab(''); kosongkan(false);
+    terisiRef.current = ''; setAsli({}); setPerluPanduan(false);
     void muatKonfig(); void muatRiwayat();
   }, [buka, site, arah, muatKonfig, muatRiwayat, kosongkan]);
 
   const tabObj = konfig?.tabs.find((t) => t.tab === tab) ?? null;
+
+  // Mode ubah/salin: isi form dari baris yang dipilih begitu template tab-nya tiba.
+  useEffect(() => {
+    if (!buka || !konfig || !sumber) return;
+    const kunci = `${edit ? 'u' : 's'}:${sumber.id}`;
+    if (terisiRef.current === kunci) return;
+    const t = konfig.tabs.find((x) => x.tab === sumber.tab);
+    if (!t) return;
+    terisiRef.current = kunci;
+    const n: Record<string, string> = {};
+    for (const k of t.kolom) {
+      if (k.auto || k.rumus) continue;
+      const v = sumber.nilai[String(k.idx)];
+      n[kunciKolom(k)] = v === undefined || v === null ? '' : k.jenis === 'angka' && typeof v === 'number' ? fmtAngka(v, 3) : String(v);
+    }
+    // Total/Ket WR: ikut otomatis bila nilainya memang hasil hitungan; bila berbeda berarti pernah diketik manual → pertahankan.
+    const j = bacaAngka(n.jumlah ?? ''), h = bacaAngka(n.harga ?? ''), tot = bacaAngka(n.totalHarga ?? '');
+    const total = j !== null && h !== null ? Math.round(j * h * 100) / 100 : null;
+    const totMan = tot !== null && (total === null || Math.abs(tot - total) > 0.01);
+    const kNoWr = t.kolom.find((k) => !k.auto && !k.rumus && adalahNoWr(k)), kKet = t.kolom.find((k) => !k.auto && !k.rumus && adalahKetWr(k));
+    const ketMan = !!kNoWr && !!kKet && (n[kunciKolom(kKet)] ?? '').trim() !== ketWrOtomatis(n[kunciKolom(kNoWr)] ?? '');
+    if (salin) n.tanggal = hariIni;
+    setTab(t.tab); setNilai(n); setTotalManual(totMan); setKetWrManual(ketMan);
+    if (edit) {
+      setAsli({ ...n, totalHarga: totMan ? n.totalHarga ?? '' : total !== null ? fmtAngka(total) : '', ...(kNoWr && kKet && !ketMan ? { [kunciKolom(kKet)]: ketWrOtomatis(n[kunciKolom(kNoWr)] ?? '') } : {}) });
+    }
+  }, [buka, konfig, sumber, edit, salin, hariIni]);
 
   // Kursor langsung ke kolom pencarian barang begitu form siap — tidak perlu klik dulu.
   const siap = !!tabObj && !memuat;
@@ -201,13 +244,15 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
   const kolomKetWr = useMemo(() => tabObj?.kolom.find((k) => !k.auto && !k.rumus && adalahKetWr(k)) ?? null, [tabObj]);
   const kolomNoWr = useMemo(() => tabObj?.kolom.find((k) => !k.auto && !k.rumus && adalahNoWr(k)) ?? null, [tabObj]);
   const ketWrAktif = !!kolomKetWr && !!kolomNoWr; // fitur otomatis hanya bila tab punya kolom "Ket WR." dan "No. WR"
-  const efektif = useMemo((): Record<string, string> => {
-    const j = bacaAngka(nilai.jumlah ?? ''), h = bacaAngka(nilai.harga ?? '');
+  const hitungEfektif = (n: Record<string, string>, totalMan: boolean, ketMan: boolean): Record<string, string> => {
+    const j = bacaAngka(n.jumlah ?? ''), h = bacaAngka(n.harga ?? '');
     const otomatis = j !== null && j > 0 && h !== null && h >= 0 ? Math.round(j * h * 100) / 100 : null;
-    const hasil: Record<string, string> = { ...nilai, totalHarga: totalManual ? (nilai.totalHarga ?? '') : otomatis !== null ? fmtAngka(otomatis) : '' };
-    if (ketWrAktif && !ketWrManual) hasil[kunciKolom(kolomKetWr!)] = ketWrOtomatis(nilai[kunciKolom(kolomNoWr!)] ?? '');
+    const hasil: Record<string, string> = { ...n, totalHarga: totalMan ? (n.totalHarga ?? '') : otomatis !== null ? fmtAngka(otomatis) : '' };
+    if (ketWrAktif && !ketMan) hasil[kunciKolom(kolomKetWr!)] = ketWrOtomatis(n[kunciKolom(kolomNoWr!)] ?? '');
     return hasil;
-  }, [nilai, totalManual, ketWrAktif, ketWrManual, kolomKetWr, kolomNoWr]);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const efektif = useMemo(() => hitungEfektif(nilai, totalManual, ketWrManual), [nilai, totalManual, ketWrAktif, ketWrManual, kolomKetWr, kolomNoWr]);
 
   const tglIso = efektif.tanggal || '';
   const tglValid = /^\d{4}-\d{2}-\d{2}$/.test(tglIso);
@@ -277,7 +322,15 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
     setTimeout(() => document.getElementById('im-f-jumlah')?.focus(), 30);
   };
 
-  const kotor = Object.entries(nilai).some(([k, v]) => v && !['tanggal', 'alokasi', 'pic'].includes(k));
+  const kolomBerubah = useMemo(() => {
+    if (!edit || !tabObj) return [] as KolomInput[];
+    return tabObj.kolom.filter((k) => {
+      if (k.auto || k.rumus) return false;
+      const key = kunciKolom(k), a = (asli[key] ?? '').trim(), b = (efektif[key] ?? '').trim();
+      return k.jenis === 'angka' ? bacaAngka(a) !== bacaAngka(b) : a !== b;
+    });
+  }, [edit, tabObj, asli, efektif]);
+  const kotor = edit ? kolomBerubah.length > 0 : Object.entries(nilai).some(([k, v]) => v && !['tanggal', 'alokasi', 'pic'].includes(k));
   const tutup = () => { if (kotor && tahap !== 'selesai' && !window.confirm('Isian belum disimpan. Tutup dan buang isian ini?')) return; onTutup(); };
 
   useEffect(() => {
@@ -307,7 +360,9 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
       payload[k.idx] = k.jenis === 'angka' ? (v === '' ? '' : (bacaAngka(v) ?? v)) : v;
     }
     try {
-      const h = await api.post<HasilSimpan>('/weekly-reports/input', { site, direction: arah, tab, nilai: payload, abaikan: daftarAbaikan }, { timeoutMs: 90_000, ulang: false });
+      const h = edit
+        ? await api.patch<HasilSimpan>(`/weekly-reports/input/${edit.id}`, { nilai: payload, abaikan: daftarAbaikan }, { timeoutMs: 90_000, ulang: false })
+        : await api.post<HasilSimpan>('/weekly-reports/input', { site, direction: arah, tab, nilai: payload, abaikan: daftarAbaikan }, { timeoutMs: 90_000, ulang: false });
       setHasil(h); setTahap('selesai'); keAtas();
       void muatRiwayat(); void muatKonfig(true); onTersimpan();
     } catch (e) {
@@ -318,7 +373,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
         for (const k of tabObj.kolom) if (d.galatField[k.idx]) peta[kunciKolom(k)] = d.galatField[k.idx];
         setGalatServer(peta); setCoba(true); setTahap('isi');
       } else if (err.status === 409 && d?.konflik) { setKonflik({ jenis: d.konflik, pesan: err.message }); setAbaikan(daftarAbaikan); }
-      else setGalatUmum(err.message || 'Gagal menyimpan. Coba lagi.');
+      else { setGalatUmum(err.message || 'Gagal menyimpan. Coba lagi.'); setPerluPanduan(d?.konflik === 'belum-tersambung'); }
     } finally { setMenyimpan(false); }
   };
 
@@ -466,7 +521,13 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
     else if (k.field === 'tanggal') tampil = tglValid ? tglPendek(tglIso) : v;
     else if (k.jenis === 'angka') { const n = bacaAngka(v); tampil = n === null ? v : `${(k.field === 'harga' || k.field === 'totalHarga') ? 'Rp ' : ''}${fmtAngka(n, 3)}`; }
     else tampil = k.field === 'kode' ? v.toUpperCase() : v;
-    return { k, tampil, otomatis };
+    const berubah = !!edit && kolomBerubah.some((x) => x.idx === k.idx);
+    let dulu = '';
+    if (berubah) {
+      const a = (asli[key] ?? '').trim();
+      dulu = k.field === 'tanggal' && /^\d{4}-\d{2}-\d{2}$/.test(a) ? tglPendek(a) : k.jenis === 'angka' ? (bacaAngka(a) === null ? a : fmtAngka(bacaAngka(a)!, 3)) : a;
+    }
+    return { k, tampil, otomatis, berubah, dulu };
   });
 
   const statusKoneksi = !konfig ? null : konfig.tersambung
@@ -514,12 +575,12 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
 
   return (
     <div className="im-overlay" onClick={(e) => { if (e.target === e.currentTarget) tutup(); }}>
-      <div className="im-panel" role="dialog" aria-modal="true" aria-label={`Catat ${namaArah}`} onKeyDown={tombolKey}>
+      <div className="im-panel" role="dialog" aria-modal="true" aria-label={`${judulMode} ${namaArah}`} onKeyDown={tombolKey}>
         <div className="im-head">
           <div className="im-head-ico"><IkonArah size={22} /></div>
           <div style={{ minWidth: 0 }}>
-            <h3 className="im-title">Catat {namaArah}</h3>
-            <div className="im-sub">{siteLabel} · kolom mengikuti template Google Sheet</div>
+            <h3 className="im-title">{judulMode} {namaArah}</h3>
+            <div className="im-sub">{siteLabel} · {edit ? <>mengubah <b>{edit.nama}</b></> : salin ? <>salinan dari <b>{salin.nama}</b> — tanggal diatur ke hari ini</> : 'kolom mengikuti template Google Sheet'}</div>
           </div>
           <button type="button" className="fm-close" onClick={tutup} aria-label="Tutup"><X size={18} /></button>
         </div>
@@ -556,6 +617,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                             <button type="button" className="im-chip" onClick={() => void salinEmail(konfig.emailLayanan!)}>{emailDisalin ? 'Tersalin ✓' : 'Salin'}</button>
                           </div>
                         : <div className="im-email"><span>Server belum punya akun layanan. Isi variabel <code>GOOGLE_SERVICE_ACCOUNT_B64</code> di hosting backend lalu deploy ulang.</span></div>}
+                      {onBukaPanduan && <div className="im-email"><button type="button" className="im-chip" onClick={onBukaPanduan}><BookOpen size={12} style={{ verticalAlign: '-2px' }} /> Buka panduan langkah demi langkah</button></div>}
                     </div>
                   )}
                 </div>
@@ -567,7 +629,8 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
 
               {tabObj && tahap === 'isi' && (
                 <>
-                  {konfig.tabs.length > 1 && (
+                  {edit && <div className="im-status ok"><Info size={16} /><div>Mengubah baris di tab <b>{edit.tab}</b>{konfig.tersambung ? ' — perubahan ikut ditulis ke Google Sheet.' : '.'} Kolom rumus di sheet tidak disentuh.</div></div>}
+                  {!edit && konfig.tabs.length > 1 && (
                     <div>
                       <span className="im-lbl">Tab tujuan di sheet</span>
                       <div className="im-tabs" role="group" aria-label="Tab tujuan">
@@ -579,7 +642,7 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                       </div>
                     </div>
                   )}
-                  {galatUmum && <div className="fm-error" role="alert">{galatUmum}</div>}
+                  {galatUmum && <div className="fm-error" role="alert">{galatUmum}{perluPanduan && onBukaPanduan && <> <button type="button" className="im-chip" onClick={onBukaPanduan}>Buka panduan</button></>}</div>}
                   {bagian.map((b) => (
                     <section key={b.id} className="im-sec" aria-label={b.judul}>
                       <h4 className="im-sec-t">{b.judul}</h4>
@@ -597,11 +660,11 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
 
               {tabObj && tahap === 'periksa' && (
                 <>
-                  <div className="im-status ok"><Info size={16} /><div>Tinjau sekali lagi. Ini yang akan ditambahkan sebagai <b>baris baru</b> di tab <b>{tabObj.tab}</b>{konfig.tersambung ? ' pada Google Sheet' : ''}.</div></div>
+                  <div className="im-status ok"><Info size={16} /><div>{edit ? <>Tinjau perubahan. <b>{kolomBerubah.length}</b> kolom berubah (ditandai) pada baris di tab <b>{tabObj.tab}</b>{konfig.tersambung ? ' — akan ditulis juga ke Google Sheet' : ''}.</> : <>Tinjau sekali lagi. Ini yang akan ditambahkan sebagai <b>baris baru</b> di tab <b>{tabObj.tab}</b>{konfig.tersambung ? ' pada Google Sheet' : ''}.</>}</div></div>
                   <div className="im-pratinjau">
                     <table><tbody>
-                      {barisPratinjau.map(({ k, tampil, otomatis }) => (
-                        <tr key={k.idx}><th scope="row">{k.judul}</th><td className={otomatis ? 'auto' : undefined}>{tampil || '—'}</td></tr>
+                      {barisPratinjau.map(({ k, tampil, otomatis, berubah, dulu }) => (
+                        <tr key={k.idx} className={berubah ? 'im-berubah' : undefined}><th scope="row">{k.judul}</th><td className={otomatis ? 'auto' : undefined}>{berubah && <s className="im-dulu">{dulu || '—'}</s>}{berubah && ' → '}{tampil || '—'}</td></tr>
                       ))}
                     </tbody></table>
                   </div>
@@ -616,18 +679,18 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                       </div>
                     </div>
                   )}
-                  {galatUmum && <div className="fm-error" role="alert">{galatUmum}</div>}
+                  {galatUmum && <div className="fm-error" role="alert">{galatUmum}{perluPanduan && onBukaPanduan && <> <button type="button" className="im-chip" onClick={onBukaPanduan}>Buka panduan</button></>}</div>}
                 </>
               )}
 
               {tahap === 'selesai' && hasil && (
                 <div className={`im-kartu ${hasil.status === 'ok' ? 'ok' : 'warn'}`} role="status">
                   <div className="im-ikon-besar">{hasil.status === 'ok' ? <CheckCircle2 size={28} /> : <AlertTriangle size={26} />}</div>
-                  <h4>{hasil.status === 'ok' ? 'Tersimpan' : hasil.status === 'pending' ? 'Tersimpan di aplikasi, menunggu dikirim ke sheet' : 'Tersimpan di aplikasi, belum masuk ke sheet'}</h4>
+                  <h4>{hasil.status === 'ok' ? (edit ? 'Perubahan tersimpan' : 'Tersimpan') : hasil.status === 'pending' ? 'Tersimpan di aplikasi, menunggu dikirim ke sheet' : 'Tersimpan di aplikasi, belum masuk ke sheet'}</h4>
                   <p>{hasil.pesan}</p>
                   <div className="baris">
-                    <button type="button" className="btn-primary" onClick={() => { kosongkan(true); setTahap('isi'); setTimeout(() => document.getElementById('im-f-kode')?.focus(), 60); }}><Plus size={16} /> Catat lagi</button>
-                    <button type="button" className="im-btn-sec" onClick={onTutup}>Selesai</button>
+                    {!edit && <button type="button" className="btn-primary" onClick={() => { kosongkan(true); setTahap('isi'); setTimeout(() => document.getElementById('im-f-kode')?.focus(), 60); }}><Plus size={16} /> Catat lagi</button>}
+                    <button type="button" className={edit ? 'btn-primary' : 'im-btn-sec'} onClick={onTutup}>Selesai</button>
                     {hasil.status === 'gagal' && <button type="button" className="im-btn-sec" disabled={mengirimUlang === hasil.id} onClick={() => void kirimUlang(hasil.id)}><RefreshCw size={14} /> Kirim ulang</button>}
                   </div>
                 </div>
@@ -668,8 +731,8 @@ export function InputBarangPanel({ buka, site, siteLabel, arah, entitasAwal, onT
                 </>
               ) : (
                 <>
-                  <button type="button" className="btn-primary" disabled={menyimpan || !!konflik} onClick={() => void simpan()} title="Ctrl + Enter">
-                    {menyimpan ? <><Loader2 size={16} className="im-putar" /> Menyimpan…</> : <><Send size={16} /> {konfig?.tersambung ? 'Simpan ke Sheet' : 'Simpan'}</>}
+                  <button type="button" className="btn-primary" disabled={menyimpan || !!konflik || (!!edit && kolomBerubah.length === 0)} onClick={() => void simpan()} title={edit && kolomBerubah.length === 0 ? 'Belum ada yang diubah' : 'Ctrl + Enter'}>
+                    {menyimpan ? <><Loader2 size={16} className="im-putar" /> Menyimpan…</> : <><Send size={16} /> {edit ? 'Simpan Perubahan' : konfig?.tersambung ? 'Simpan ke Sheet' : 'Simpan'}</>}
                   </button>
                   <button type="button" className="im-btn-sec" onClick={() => { setTahap('isi'); setKonflik(null); }} disabled={menyimpan}><ArrowLeft size={16} /> Ubah</button>
                 </>

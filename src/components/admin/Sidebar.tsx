@@ -27,6 +27,7 @@ import {
   ChevronDown,
   PieChart,
   Gauge,
+  FileCheck2,
 } from 'lucide-react';
 
 export type AdminView =
@@ -39,6 +40,7 @@ export type AdminView =
   | 'weekly-report'
   | 'categories'
   | 'assignments'
+  | 'good-receipt'
   | 'maintenance'
   | 'audit'
   | 'branches'
@@ -120,6 +122,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'assets', label: 'Spare Part', icon: Package },
       { id: 'categories', label: 'Kategori', icon: Tags },
       { id: 'assignments', label: 'Transfer Antar Site', icon: ArrowLeftRight },
+      { id: 'good-receipt', label: 'Good Receipt', icon: FileCheck2 },
       { id: 'maintenance', label: 'Maintenance', icon: Wrench },
       { id: 'audit', label: 'Audit / Log', icon: ClipboardList },
     ],

@@ -140,8 +140,33 @@ async function unduh(path: string, opsi: OpsiRequest = {}): Promise<HasilUnduh> 
   }
 }
 
+/** Unggah satu berkas mentah (mis. PDF) dengan indikator kemajuan. Metadata dikirim lewat query string di `path`. */
+function unggah<T>(path: string, berkas: Blob, opsi: { onProgress?: (bagian: number) => void; timeoutMs?: number } = {}): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}${path}`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('Content-Type', berkas.type || 'application/octet-stream');
+    xhr.timeout = opsi.timeoutMs ?? 120_000;
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) opsi.onProgress?.(e.loaded / e.total); };
+    xhr.onload = () => {
+      let body: Record<string, unknown> | null = null;
+      try { body = JSON.parse(xhr.responseText); } catch { /* bukan JSON (mis. error proxy) */ }
+      if (xhr.status === 401) setToken(null);
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as T);
+      const gateway = STATUS_GATEWAY.has(xhr.status);
+      reject(new ApiError((body?.error as string) || (gateway ? `Server sedang tidak tersedia (HTTP ${xhr.status}). Coba lagi sebentar lagi.` : `Permintaan gagal (${xhr.status})`), xhr.status, body ?? undefined));
+    };
+    xhr.onerror = () => reject(new ApiError(PESAN_JARINGAN, 0));
+    xhr.ontimeout = () => reject(new ApiError(PESAN_TIMEOUT, 0));
+    xhr.send(berkas);
+  });
+}
+
 export const api = {
   unduh,
+  unggah,
   get: <T>(path: string, opsi?: OpsiRequest) => request<T>(path, { ...opsi }),
   post: <T>(path: string, data?: unknown, opsi?: OpsiRequest) => request<T>(path, { method: 'POST', body: data !== undefined ? JSON.stringify(data) : undefined, ...opsi }),
   patch: <T>(path: string, data?: unknown, opsi?: OpsiRequest) => request<T>(path, { method: 'PATCH', body: data !== undefined ? JSON.stringify(data) : undefined, ...opsi }),

@@ -212,3 +212,11 @@ button.im-step-link:hover:not(:disabled) { color: var(--ce-green); }
 @media (prefers-reduced-motion: reduce) {
   .im-overlay, .im-panel, .im-putar { animation: none; }
 }
+/* Mode ubah: tinjauan sebelum → sesudah */
+.im-pratinjau tr.im-berubah th, .im-pratinjau tr.im-berubah td { background: rgba(251, 191, 36, 0.14); }
+.im-pratinjau tr.im-berubah td { font-weight: 700; }
+.im-dulu { color: var(--txt-muted); font-weight: 500; text-decoration: line-through; }
+.fm-error .im-chip { margin-left: 0.4rem; }
+
+/* Item di dalam .im-body (flex column) tidak boleh menyusut — tabel Tinjau yang overflow:hidden sebelumnya terpotong. */
+.im-body > * { flex-shrink: 0; }

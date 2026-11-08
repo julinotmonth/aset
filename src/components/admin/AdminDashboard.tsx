@@ -53,6 +53,7 @@ import { ReportsView } from './AssetManagementViews';
 import { AsetTetapView } from './AsetTetapView';
 import { JadwalMaintenance, type TujuanNav } from './JadwalMaintenance';
 import { SiteOperasionalView } from './SiteOperasionalView';
+import { GoodReceiptView } from './GoodReceiptView';
 import { TimLapangan } from './TimLapangan';
 import { UserManagementView } from './KelolaPengguna';
 import { GlobalSearchView, GlobalSearchPalette, type FokusLaporan } from './GlobalSearch';
@@ -668,6 +669,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ auth, onLogout, 
           <TransferHub auth={auth} riwayat={
             <AssignmentsView tanpaHeader spareParts={spareParts} logs={logs} onConfirmTransfer={handleConfirmTransfer} />} />
         )}
+        {activeView === 'good-receipt' && <GoodReceiptView auth={auth} />}
         {activeView === 'maintenance' && (
           <MaintenanceView
             spareParts={spareParts}

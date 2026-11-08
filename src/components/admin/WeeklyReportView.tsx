@@ -12,6 +12,8 @@ import type { CSSProperties } from 'react';
 import { NADA, SERI, tooltipProps, fmtLegend, fmtLegendPie, WR_CSS, useWrTema } from './wrTema';
 import type { Nada } from './wrTema';
 import { InputBarangPanel } from './InputBarangPanel';
+import { KelolaTransaksiPanel } from './KelolaTransaksiPanel';
+import { SambungSheetPanduan } from './SambungSheetPanduan';
 import {
   URUT_KELAS, tambahKlasifikasi, ringkasKlasifikasi, jenisTakDikenal, nilaiBaris, bandingkanSub,
 } from './asetKlasifikasi';
@@ -22,7 +24,7 @@ import { NADA_KELAS, IKON_KELAS, ikonSub } from './asetKlasifikasiTema';
 type BarisAset = WeeklyRow & Klasifikasi;
 import {
   RefreshCw, Upload, Link2, Download, AlertTriangle, CheckCircle2, Loader2,
-  TrendingDown, TrendingUp, Package, Boxes, X, Plus,
+  TrendingDown, TrendingUp, Package, Boxes, X, Plus, ListChecks,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -837,6 +839,8 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   // (kolom, urutan, dan isi sel persis sheet; dibangun server dari header + sel asli yang disimpan saat sync).
   const [mengekspor, setMengekspor] = useState(false);
   const [inputBuka, setInputBuka] = useState(false); // panel Input Manual (Barang Masuk / Keluar)
+  const [kelolaBuka, setKelolaBuka] = useState(false); // panel Kelola Data (ubah / salin / hapus)
+  const [panduanBuka, setPanduanBuka] = useState(false); // panduan Sambungkan Google Sheet
   const unduhExcel = async () => {
     setMengekspor(true); setPesan(null);
     try {
@@ -988,6 +992,11 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
           <button type="button" className="wr-btn" onClick={() => setInputBuka(true)} title={`Tambah ${arah === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} langsung dari website — otomatis masuk ke Google Sheet`}
             style={{ ...tombol, background: 'var(--ce-green)', color: '#04251a', fontWeight: 700, borderColor: 'transparent' }}>
             <Plus size={15} /> Input Manual
+          </button>
+        )}
+        {arah !== 'ASET' && site !== 'global' && (
+          <button type="button" className="wr-btn" onClick={() => setKelolaBuka(true)} title={`Cari, ubah, salin, atau hapus ${arah === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} — ikut tersinkron ke Google Sheet`} style={tombol}>
+            <ListChecks size={15} /> Kelola Data
           </button>
         )}
         <button type="button" className="wr-btn" onClick={arah === 'ASET' ? unduhCsv : () => void unduhExcel()} disabled={mengekspor} aria-busy={mengekspor || undefined} style={tombol}
@@ -1527,8 +1536,13 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       </>
       )}
       {arah !== 'ASET' && site !== 'global' && (
-        <InputBarangPanel buka={inputBuka} site={site} siteLabel={labelPenuh(labelSite)} arah={arah} entitasAwal={entitas || undefined}
-          onTutup={() => setInputBuka(false)} onTersimpan={() => void muatData(true)} />
+        <>
+          <InputBarangPanel buka={inputBuka} site={site} siteLabel={labelPenuh(labelSite)} arah={arah} entitasAwal={entitas || undefined}
+            onTutup={() => setInputBuka(false)} onTersimpan={() => void muatData(true)} onBukaPanduan={() => setPanduanBuka(true)} />
+          <KelolaTransaksiPanel buka={kelolaBuka} site={site} siteLabel={labelPenuh(labelSite)} arah={arah} entitasAwal={entitas || undefined}
+            onTutup={() => setKelolaBuka(false)} onBerubah={() => void muatData(true)} onBukaPanduan={() => setPanduanBuka(true)} />
+          <SambungSheetPanduan buka={panduanBuka} site={site} siteLabel={labelPenuh(labelSite)} onTutup={() => setPanduanBuka(false)} onSelesai={() => void muatData(true)} />
+        </>
       )}
     </>
 

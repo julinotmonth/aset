@@ -1,0 +1,83 @@
+/* Panel "Kelola Data" (CRUD). Memakai kelas dasar .im-* dari inputTransaksi.css. z-index di bawah form (.im-overlay = 110). */
+.kt-overlay { position: fixed; inset: 0; z-index: 105; display: flex; justify-content: flex-end; background: rgba(5, 8, 16, 0.62); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: im-fade 0.18s ease-out; }
+.kt-panel { position: relative; width: min(1080px, 100vw); height: 100dvh; display: flex; flex-direction: column; background: var(--bg-surface); border-left: 1px solid rgba(0, 208, 132, 0.28); box-shadow: -18px 0 60px rgba(0, 0, 0, 0.35); animation: im-geser 0.22s cubic-bezier(0.22, 0.9, 0.3, 1); }
+.kt-bar { display: flex; gap: 0.6rem; align-items: center; padding: 0.8rem 1.35rem 0.4rem; flex-shrink: 0; }
+.kt-cari { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; padding: 0 0.8rem; min-height: 44px; border-radius: 12px; background: var(--bg-root); border: 1px solid var(--border-subtle); color: var(--txt-muted); }
+.kt-cari:focus-within { border-color: var(--ce-green); box-shadow: 0 0 0 3px rgba(0, 208, 132, 0.18); }
+.kt-cari input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--txt-primary); font: inherit; font-size: 0.88rem; }
+.kt-cari button { background: none; border: 0; cursor: pointer; color: var(--txt-muted); display: inline-flex; padding: 4px; border-radius: 6px; }
+.kt-tambah { min-height: 44px; display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+.kt-ikon { min-width: 44px; padding: 0 !important; }
+.kt-filter { display: flex; flex-direction: column; gap: 0.1rem; padding: 0 1.35rem 0.4rem; flex-shrink: 0; }
+.kt-filter .im-chips { margin-top: 0.3rem; }
+.kt-info { display: flex; align-items: center; gap: 0.6rem; margin: 0.3rem 1.35rem; padding: 0.5rem 0.8rem; border-radius: 12px; font-size: 0.78rem; border: 1px solid; flex-shrink: 0; }
+.kt-info > div { flex: 1; min-width: 0; }
+.kt-info.warn { background: rgba(251, 191, 36, 0.12); border-color: rgba(251, 191, 36, 0.4); }
+.kt-info.warn svg { color: #D99A00; flex-shrink: 0; }
+.kt-info.ok { background: rgba(0, 208, 132, 0.08); border-color: rgba(0, 208, 132, 0.3); color: var(--txt-muted); }
+.kt-info.ok svg { color: #00D084; flex-shrink: 0; }
+.kt-massal { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.3rem 1.35rem; padding: 0.5rem 0.8rem; border-radius: 12px; background: rgba(0, 208, 132, 0.1); border: 1px solid rgba(0, 208, 132, 0.4); font-size: 0.82rem; color: var(--txt-primary); animation: im-fade 0.15s; }
+.kt-bahaya { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.7rem; border-radius: 8px; cursor: pointer; font-size: 0.74rem; font-weight: 800; background: #EF4444; color: #fff; border: 0; }
+.kt-bahaya:hover { background: #DC2626; }
+.kt-isi { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0.4rem 0 0; }
+.kt-tabel-wrap { transition: opacity 0.15s; }
+.kt-tabel-wrap.memuat { opacity: 0.55; pointer-events: none; }
+.kt-tabel { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.kt-tabel thead th { position: sticky; top: 0; z-index: 2; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); text-align: left; padding: 0.5rem 0.6rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--txt-muted); white-space: nowrap; }
+.kt-th button { background: none; border: 0; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; display: inline-flex; align-items: center; gap: 3px; padding: 2px 0; }
+.kt-th button:hover { color: var(--ce-green); }
+.kt-tabel .kanan { text-align: right; }
+.kt-tabel tbody td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border-subtle); color: var(--txt-primary); vertical-align: middle; }
+.kt-tabel tbody tr { transition: background 0.12s; }
+.kt-tabel tbody tr:hover { background: rgba(0, 208, 132, 0.06); }
+.kt-tabel tbody tr.dipilih { background: rgba(0, 208, 132, 0.12); }
+.kt-tabel tbody tr.sibuk { opacity: 0.5; }
+.kt-tabel tbody tr.tanya { background: rgba(239, 68, 68, 0.1); }
+.kt-tabel .kt-cek { width: 38px; padding-left: 1.35rem; }
+.kt-tabel td:last-child, .kt-tabel th:last-child { padding-right: 1.35rem; }
+.kt-cek input { width: 16px; height: 16px; accent-color: #00D084; cursor: pointer; }
+.kt-tgl { white-space: nowrap; color: var(--txt-muted); }
+.kt-brg { max-width: 300px; }
+.kt-brg b, .kt-brg span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kt-brg span, .kt-num span, .kt-ubah { font-size: 0.7rem; color: var(--txt-muted); font-weight: 500; }
+.kt-num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kt-num span { display: block; }
+.kt-num small { color: var(--txt-muted); }
+.kt-alok { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kt-ubah { display: block; margin-top: 2px; }
+.kt-aksi { white-space: nowrap; }
+.kt-tanya { font-size: 0.74rem; font-weight: 700; margin-right: 0.3rem; color: #C02626; }
+.kt-ikon-k { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; background: transparent; color: var(--txt-muted); border: 1px solid transparent; }
+.kt-ikon-k:hover:not(:disabled) { background: var(--chip-bg); border-color: var(--border-subtle); color: var(--ce-green); }
+.kt-ikon-k.bahaya:hover:not(:disabled) { color: #EF4444; border-color: rgba(239, 68, 68, 0.4); }
+.kt-ikon-k:disabled { opacity: 0.35; cursor: not-allowed; }
+.kt-kosong { text-align: center; padding: 3rem 1.5rem; color: var(--txt-muted); font-size: 0.85rem; }
+.kt-kosong p { margin: 0.2rem 0; }
+.kt-kosong b { color: var(--txt-primary); }
+.kt-foot { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.6rem 1.35rem calc(0.7rem + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); font-size: 0.74rem; color: var(--txt-muted); }
+.kt-hal { display: flex; align-items: center; gap: 0.5rem; margin-right: var(--im-foot-aman, 0); }
+.kt-hal .kt-ikon { min-height: 34px; min-width: 34px; border-radius: 10px; }
+.kt-toasts { position: absolute; left: 1.35rem; bottom: 4rem; display: flex; flex-direction: column; gap: 0.4rem; z-index: 5; max-width: calc(100% - 2.7rem); }
+.kt-toast { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.8rem; border-radius: 12px; font-size: 0.8rem; color: var(--txt-primary); background: var(--bg-surface); border: 1px solid var(--border-subtle); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); animation: im-geser 0.2s ease-out; }
+.kt-toast.ok { border-color: rgba(0, 208, 132, 0.5); }
+.kt-toast.ok svg:first-child { color: #00D084; }
+.kt-toast.bad { border-color: rgba(239, 68, 68, 0.5); }
+.kt-toast.bad svg:first-child { color: #EF4444; }
+.kt-toast span { flex: 1; min-width: 0; }
+.kt-toast button { display: inline-flex; align-items: center; gap: 3px; background: var(--chip-bg); border: 1px solid var(--border-subtle); color: var(--txt-primary); border-radius: 8px; padding: 3px 9px; font-size: 0.74rem; font-weight: 700; cursor: pointer; }
+.kt-toast button.x { background: none; border: 0; padding: 3px; color: var(--txt-muted); }
+@media (max-width: 760px) {
+  .kt-panel { width: 100vw; border-left: 0; }
+  .kt-bar, .kt-filter { padding-left: 1rem; padding-right: 1rem; }
+  .kt-info, .kt-massal { margin-left: 1rem; margin-right: 1rem; }
+  .kt-tabel thead { display: none; }
+  .kt-tabel, .kt-tabel tbody, .kt-tabel tr, .kt-tabel td { display: block; }
+  .kt-tabel tbody tr { position: relative; padding: 0.6rem 1rem 0.6rem 2.6rem; border-bottom: 1px solid var(--border-subtle); }
+  .kt-tabel tbody td { border: 0; padding: 0.1rem 0; text-align: left !important; max-width: none; }
+  .kt-tabel .kt-cek { position: absolute; left: 1rem; top: 0.8rem; width: auto; padding: 0; }
+  .kt-aksi { margin-top: 0.3rem; }
+  .kt-foot { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)); }
+  .kt-hal { margin-right: 0; }
+  .kt-toasts { bottom: 7rem; }
+}
+@media (prefers-reduced-motion: reduce) { .kt-overlay, .kt-panel, .kt-toast, .kt-massal { animation: none; } }
