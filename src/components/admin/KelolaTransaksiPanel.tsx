@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Search, Plus, Pencil, Copy, Trash2, RefreshCw, Loader2, CloudOff, Cloud, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Undo2, AlertTriangle, CheckCircle2, BookOpen, Send, ListChecks } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
+import { jalankanSync } from '../../lib/syncClient';
 import { InputBarangPanel } from './InputBarangPanel';
 import type { BarisKelola } from './InputBarangPanel';
 import './formModal.css';
@@ -55,6 +56,8 @@ export function KelolaTransaksiPanel({ buka, site, siteLabel, arah, entitasAwal,
   const [urut, setUrut] = useState<Urut>('tanggal');
   const [naik, setNaik] = useState(false);
   const [halaman, setHalaman] = useState(1);
+  const [batas, setBatas] = useState(100); // baris per halaman
+  const [sinkron, setSinkron] = useState(false); // sedang menarik data terbaru dari Google Sheet
   const [data, setData] = useState<Data | null>(null);
   const [memuat, setMemuat] = useState(false);
   const [galat, setGalat] = useState('');
@@ -81,7 +84,7 @@ export function KelolaTransaksiPanel({ buka, site, siteLabel, arah, entitasAwal,
     setGalat('');
     try {
       const { dari, sampai } = rentang(periode);
-      const p = new URLSearchParams({ site, direction: arah, urut, sortir: naik ? 'asc' : 'desc', halaman: String(halaman), batas: '25', status });
+      const p = new URLSearchParams({ site, direction: arah, urut, sortir: naik ? 'asc' : 'desc', halaman: String(halaman), batas: String(batas), status });
       if (q) p.set('q', q);
       if (tab) p.set('tab', tab);
       if (dari) { p.set('dari', dari); p.set('sampai', sampai); }
@@ -91,7 +94,27 @@ export function KelolaTransaksiPanel({ buka, site, siteLabel, arah, entitasAwal,
       if (d.halaman > 1 && d.baris.length === 0 && d.total > 0) setHalaman(Math.max(1, Math.ceil(d.total / d.batas)));
     } catch (e) { if (id === reqRef.current) setGalat((e as Error).message); }
     finally { if (id === reqRef.current) setMemuat(false); }
-  }, [site, arah, q, tab, status, periode, urut, naik, halaman]);
+  }, [site, arah, q, tab, status, periode, urut, naik, halaman, batas]);
+
+  // Tarik data terbaru dari Google Sheet (baris yang dihapus/diubah langsung di spreadsheet ikut tersinkron),
+  // lalu muat ulang tabel. Tanpa ini tabel hanya mengikuti auto-sync server yang bisa tertunda / tidak jalan
+  // saat server sedang tidur.
+  const sinkronSheet = useCallback(async (manual = false) => {
+    if (!site || site === 'global') { await muat(true); return; }
+    setSinkron(true);
+    try {
+      const r = await jalankanSync(site);
+      const dibuang = r.hasil.reduce((a, h) => a + (h.removed ?? 0), 0);
+      if (manual) toast('info', dibuang ? `Tersinkron dari Google Sheet — ${dibuang} baris yang sudah dihapus di sheet dibuang dari aplikasi.` : 'Tersinkron dari Google Sheet.');
+      else if (dibuang) toast('info', `${dibuang} baris yang dihapus di Google Sheet ikut dibuang dari aplikasi.`);
+      onBerubah();
+    } catch (e) {
+      if (manual) toast('bad', `Gagal sinkron dari Google Sheet: ${(e as Error).message}`);
+    } finally { setSinkron(false); }
+    await muat(true);
+  }, [site, muat, toast, onBerubah]);
+  const sinkronRef = useRef(sinkronSheet);
+  sinkronRef.current = sinkronSheet;
 
   // Buka panel: reset saringan. Awal: tab sesuai entitas halaman.
   useEffect(() => {
@@ -100,6 +123,8 @@ export function KelolaTransaksiPanel({ buka, site, siteLabel, arah, entitasAwal,
     setTerpilih(new Set()); setKonfirmasi(''); setData(null); setForm(null);
   }, [buka, site, arah]);
   useEffect(() => { if (buka) void muat(); }, [buka, muat]);
+  // Saat panel dibuka: tampilkan data yang ada dulu, lalu sinkron dari sheet di latar belakang.
+  useEffect(() => { if (buka) void sinkronRef.current(false); }, [buka, site, arah]);
   useEffect(() => {
     if (!data || tab || !entitasAwal) return;
     // pilih tab awal hanya sekali, saat data pertama tiba
@@ -234,7 +259,7 @@ export function KelolaTransaksiPanel({ buka, site, siteLabel, arah, entitasAwal,
             {cari && <button type="button" onClick={() => setCari('')} aria-label="Hapus pencarian"><X size={14} /></button>}
           </div>
           <button type="button" className="btn-primary kt-tambah" onClick={() => setForm({ mode: 'tambah' })}><Plus size={16} /> Tambah</button>
-          <button type="button" className="im-btn-sec kt-ikon" onClick={() => void muat()} aria-label="Muat ulang" title="Muat ulang"><RefreshCw size={16} className={memuat ? 'im-putar' : undefined} /></button>
+          <button type="button" className="im-btn-sec kt-ikon" onClick={() => void sinkronSheet(true)} disabled={sinkron} aria-label="Muat ulang dari Google Sheet" title="Muat ulang & sinkron dari Google Sheet"><RefreshCw size={16} className={memuat || sinkron ? 'im-putar' : undefined} /></button>
         </div>
 
         <div className="kt-filter">
@@ -333,8 +358,9 @@ export function KelolaTransaksiPanel({ buka, site, siteLabel, arah, entitasAwal,
         </div>
 
         <div className="kt-foot">
-          <span>{data ? `${angka(data.total, 0)} baris${adaSaringan ? ' (disaring)' : ''}` : ''} · klik dua kali untuk mengubah</span>
+          <span>{data ? `${angka(data.total, 0)} baris${adaSaringan ? ' (disaring)' : ''}${data.total > data.baris.length ? ` · menampilkan ${(halaman - 1) * data.batas + 1}–${(halaman - 1) * data.batas + data.baris.length}` : ''}` : ''}{sinkron ? ' · menyinkron dari sheet…' : ''} · klik dua kali untuk mengubah</span>
           <div className="kt-hal">
+            <label className="kt-per">Tampil <select value={batas} onChange={(e) => { setBatas(Number(e.target.value)); setHalaman(1); }} aria-label="Baris per halaman">{[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}</select> / hal.</label>
             <button type="button" className="im-btn-sec kt-ikon" disabled={halaman <= 1 || memuat} onClick={() => setHalaman((h) => h - 1)} aria-label="Halaman sebelumnya"><ChevronLeft size={16} /></button>
             <span>Hal. {halaman} / {jmlHalaman}</span>
             <button type="button" className="im-btn-sec kt-ikon" disabled={halaman >= jmlHalaman || memuat} onClick={() => setHalaman((h) => h + 1)} aria-label="Halaman berikutnya"><ChevronRight size={16} /></button>

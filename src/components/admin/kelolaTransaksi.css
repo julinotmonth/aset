@@ -1,6 +1,6 @@
 /* Panel "Kelola Data" (CRUD). Memakai kelas dasar .im-* dari inputTransaksi.css. z-index di bawah form (.im-overlay = 110). */
 .kt-overlay { position: fixed; inset: 0; z-index: 105; display: flex; justify-content: flex-end; background: rgba(5, 8, 16, 0.62); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: im-fade 0.18s ease-out; }
-.kt-panel { position: relative; width: min(1080px, 100vw); height: 100dvh; display: flex; flex-direction: column; background: var(--bg-surface); border-left: 1px solid rgba(0, 208, 132, 0.28); box-shadow: -18px 0 60px rgba(0, 0, 0, 0.35); animation: im-geser 0.22s cubic-bezier(0.22, 0.9, 0.3, 1); }
+.kt-panel { /* ruang kosong di kanan bilah bawah supaya badge "Powered by Netlify" tidak menutupi tombol halaman */ --im-foot-aman: 15rem; position: relative; width: min(1080px, 100vw); height: 100dvh; display: flex; flex-direction: column; background: var(--bg-surface); border-left: 1px solid rgba(0, 208, 132, 0.28); box-shadow: -18px 0 60px rgba(0, 0, 0, 0.35); animation: im-geser 0.22s cubic-bezier(0.22, 0.9, 0.3, 1); }
 .kt-bar { display: flex; gap: 0.6rem; align-items: center; padding: 0.8rem 1.35rem 0.4rem; flex-shrink: 0; }
 .kt-cari { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; padding: 0 0.8rem; min-height: 44px; border-radius: 12px; background: var(--bg-root); border: 1px solid var(--border-subtle); color: var(--txt-muted); }
 .kt-cari:focus-within { border-color: var(--ce-green); box-shadow: 0 0 0 3px rgba(0, 208, 132, 0.18); }
@@ -56,6 +56,8 @@
 .kt-kosong b { color: var(--txt-primary); }
 .kt-foot { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.6rem 1.35rem calc(0.7rem + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); font-size: 0.74rem; color: var(--txt-muted); }
 .kt-hal { display: flex; align-items: center; gap: 0.5rem; margin-right: var(--im-foot-aman, 0); }
+.kt-per { display: inline-flex; align-items: center; gap: 0.35rem; margin-right: 0.4rem; white-space: nowrap; }
+.kt-per select { background: var(--bg-root); color: var(--txt-primary); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 3px 6px; font: inherit; }
 .kt-hal .kt-ikon { min-height: 34px; min-width: 34px; border-radius: 10px; }
 .kt-toasts { position: absolute; left: 1.35rem; bottom: 4rem; display: flex; flex-direction: column; gap: 0.4rem; z-index: 5; max-width: calc(100% - 2.7rem); }
 .kt-toast { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.8rem; border-radius: 12px; font-size: 0.8rem; color: var(--txt-primary); background: var(--bg-surface); border: 1px solid var(--border-subtle); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); animation: im-geser 0.2s ease-out; }
@@ -77,7 +79,8 @@
   .kt-tabel .kt-cek { position: absolute; left: 1rem; top: 0.8rem; width: auto; padding: 0; }
   .kt-aksi { margin-top: 0.3rem; }
   .kt-foot { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)); }
-  .kt-hal { margin-right: 0; }
+  .kt-hal { margin-right: 0; flex-wrap: wrap; justify-content: flex-end; }
+  .kt-panel { --im-foot-aman: 0px; }
   .kt-toasts { bottom: 7rem; }
 }
 @media (prefers-reduced-motion: reduce) { .kt-overlay, .kt-panel, .kt-toast, .kt-massal { animation: none; } }
