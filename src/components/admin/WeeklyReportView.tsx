@@ -20,6 +20,8 @@ import {
 import type { KelasAset, Klasifikasi } from './asetKlasifikasi';
 import { KartuKelas, BadgeKategori, Segmen } from './AsetKlasifikasiUi';
 import { NADA_KELAS, IKON_KELAS, ikonSub } from './asetKlasifikasiTema';
+import { TEMPLATE_SITE, kunciTemplate, cocokkanBarisTemplate, barisLainDariKode } from './weeklyTemplate';
+import type { SeksiTemplate } from './weeklyTemplate';
 
 type BarisAset = WeeklyRow & Klasifikasi;
 import {
@@ -53,6 +55,8 @@ interface WeeklyRow {
   harga: number; totalHarga: number; noMr: string; genBus: string;
   statusSmr: string; noShipment: string; keterangan: string; section: Section;
   jenis: string; merk: string; tipe: string; hargaEstimasi?: number;
+  /** Kode biaya dari sheet (MH/OH/OLI/R/N/K/S/G/L/O/T) — menentukan baris Jasa di seksi Lain-Lain. */
+  kodeBiaya?: string;
   /** Diisi server bila nilai aset diambil dari kode yang sama di Barang Masuk/Keluar. */
   sumberHarga?: { metode: 'kode'; arah: 'IN' | 'OUT'; site: string; tanggal: string | null; kode: string; namaBarang: string };
 }
@@ -460,6 +464,13 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', saatTerlihat); };
   }, [muatData, menyinkron]);
 
+  // ── Template Excel per site (Week MS Wunut / Blora / KHT / SETU / LNG Sangkulirang / RET) ──
+  // Dipakai untuk data Mother Station (RDA) dan RET. Workshop (RCE) & site lain tetap memakai baris dinamis.
+  const kunciTplSite = kunciTemplate(site, labelSite);
+  const kunciTpl = kunciTplSite === 'ret' ? (entitas === 'RET' ? 'ret' : null) : (entitas === 'RDA' || (entitas === 'UMUM' && entitasTersedia.length === 1) ? kunciTplSite : null);
+  const tpl = kunciTpl ? TEMPLATE_SITE[kunciTpl] : null;
+  const seksiTpl = (k: Section): SeksiTemplate | undefined => tpl?.seksi.find((x) => x.key === k);
+
   // ── Pivot biaya (mode BARANG KELUAR) ────────────────────────────────────
   const { mingguList, pivot, totalSeksi, grandTotal, kelompokKegiatan } = useMemo(() => {
     const mingguSet = new Set<number>();
@@ -468,11 +479,23 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
 
     const kelompokKegiatan = rows.length > 0 && SITE_KELOMPOK_KEGIATAN.has(rows[0].site);
     const p: Record<Section, Record<string, Record<number, number>>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {}, ISOTANK: {} };
-    if (!kelompokKegiatan && entitas !== 'RCE') {
+    if (tpl) {
+      // Baris tetap sesuai template Excel — tetap tampil walau belum terpakai (nilai "-").
+      for (const t of tpl.seksi) for (const b of t.baris) p[t.key][b.label] = {};
+    } else if (!kelompokKegiatan && entitas !== 'RCE') {
       for (const s of SECTIONS) for (const a of BARIS_UNIVERSAL[s.key]) p[s.key][a] = {};
     }
     for (const r of rows) {
-      const bucket = (p[r.section][kunciBarisPivot(r)] ??= {});
+      let kunci = kunciBarisPivot(r);
+      const t = tpl?.seksi.find((x) => x.key === r.section);
+      // Alokasi yang tak ada di template tetap dihitung (baris tambahan di bawah), supaya total tidak hilang.
+      if (t) {
+        // Lain-Lain: baris ditentukan KODE (R → Jasa Service & Repair, N → Jasa New Instalasi, dst), bukan nama alokasi.
+        // Seksi lain (MH/OH/OLI): baris = alokasi (mesin) yang sesuai.
+        const baris = r.section === 'LAIN' ? barisLainDariKode(t, r.kodeBiaya ?? '') : null;
+        kunci = baris ?? cocokkanBarisTemplate(t, r.alokasi) ?? kunci;
+      }
+      const bucket = (p[r.section][kunci] ??= {});
       bucket[r.minggu] = (bucket[r.minggu] ?? 0) + r.totalHarga;
     }
 
@@ -487,7 +510,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       }
     }
     return { mingguList: minggus, pivot: p, totalSeksi: ts, grandTotal: gt, kelompokKegiatan };
-  }, [rows, entitas]);
+  }, [rows, entitas, tpl]);
 
   const totalKeseluruhan = useMemo(
     () => Object.values(grandTotal).reduce((a, b) => a + b, 0), [grandTotal]);
@@ -501,13 +524,67 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   // SITE_HANYA_LAIN_ISOTANK), ketiganya disembunyikan supaya tidak muncul
   // kartu/tabel kosong yang tidak relevan dengan laporan asli site itu.
   const sectionsAktif = useMemo(() => {
+    if (tpl) {
+      // Urutan seksi mengikuti template; seksi di luar template hanya tampil bila ada datanya.
+      const urut = tpl.seksi.map((t) => SECTIONS.find((s) => s.key === t.key)!);
+      const ekstra = SECTIONS.filter((s) => !tpl.seksi.some((t) => t.key === s.key) && Object.keys(pivot[s.key]).length > 0);
+      return [...urut, ...ekstra];
+    }
     // ISO Tank hanya untuk LNG (Sangkulirang); site lain tidak menampilkannya.
     if (SITE_HANYA_LAIN_ISOTANK.has(site)) return SECTIONS.filter((s) => s.key === 'LAIN' || s.key === 'ISOTANK');
     const tanpaIso = SECTIONS.filter((s) => s.key !== 'ISOTANK');
     // Workshop (RCE): tampilkan hanya seksi yang punya baris alokasi nyata.
     if (entitas === 'RCE') return tanpaIso.filter((s) => Object.keys(pivot[s.key]).length > 0);
     return tanpaIso;
-  }, [site, entitas, pivot]);
+  }, [site, entitas, pivot, tpl]);
+
+  // Nama baris, judul, dan urutan baris tiap seksi: ikut template bila site-nya punya, selain itu bawaan.
+  const judulSeksi = (s: { key: Section; judul: string }) => seksiTpl(s.key)?.judul ?? s.judul;
+  const totalLabelSeksi = (s: { key: Section; totalLabel: string }) => seksiTpl(s.key)?.totalLabel ?? s.totalLabel;
+  const kolomSeksi = (k: Section) => seksiTpl(k)?.labelKolom ?? LABEL_SEKSI[k];
+  const aliasBaris = (k: Section, label: string) => seksiTpl(k)?.baris.find((b) => b.label === label)?.alias;
+  const diLuarTemplate = (k: Section, label: string) => { const t = seksiTpl(k); return !!t && !t.baris.some((b) => b.label === label); };
+  /** Baris template dulu (urutan Excel), baru alokasi tambahan yang tak ada di template. */
+  const urutBaris = (k: Section, keys: string[]): string[] => {
+    const t = seksiTpl(k);
+    if (!t) return urutkanBarisSeksi(k, keys);
+    const dalam = t.baris.map((b) => b.label);
+    const ada = new Set(dalam);
+    const tambahan = keys.filter((x) => !ada.has(x)).sort((a, b) => a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' }));
+    return [...dalam, ...tambahan];
+  };
+
+  // Blok "NB :" di bawah tabel — kalimatnya mengikuti sheet Excel masing-masing site.
+  const barisNb = useMemo((): { teks: string; nilai: number; warna: string }[] | null => {
+    if (!tpl || !kunciTpl) return null;
+    const nama = labelPenuh(labelSite).toUpperCase();
+    const tot = (k: Section) => totalPerSeksi[k] ?? 0;
+    const rata = (k: Section) => (mingguList.length ? mingguList.reduce((t, m) => t + (totalSeksi[k][m] ?? 0), 0) / mingguList.length : 0);
+    if (kunciTpl === 'sangkulirang') {
+      return [
+        { teks: `Total penggunaan Part Maintenance ISO Tank ${nama} sebesar :`, nilai: tot('ISOTANK'), warna: NADA.info.teks },
+        { teks: 'Dengan Rata-rata penggunaan Part Maintenance ISO Tank Sebesar :', nilai: rata('ISOTANK'), warna: NADA.info.teks },
+        { teks: `Grand Total penggunaan Part ${nama} sebesar :`, nilai: totalKeseluruhan, warna: NADA.in.teks },
+      ];
+    }
+    if (kunciTpl === 'ret') {
+      return [
+        { teks: `Total penggunaan Part Maintenance ${nama} sebesar :`, nilai: tot('MAINT'), warna: NADA.in.teks },
+        { teks: `Total penggunaan part Overhaul ${nama} sebesar :`, nilai: tot('OH'), warna: NADA.out.teks },
+        { teks: `Total penggunaan Oli ${nama} sebesar :`, nilai: tot('OLI'), warna: NADA.warn.teks },
+        { teks: `Total penggunaan lain-lain ${nama} sebesar :`, nilai: tot('LAIN'), warna: NADA.aset.teks },
+        { teks: `Grand Total penggunaan Part ${nama} sebesar :`, nilai: totalKeseluruhan, warna: NADA.in.teks },
+      ];
+    }
+    return [
+      { teks: `Total penggunaan Part Maintenance ${nama} sebesar :`, nilai: tot('MAINT'), warna: NADA.in.teks },
+      { teks: 'Dengan Rata-rata penggunaan Part Maintenance Sebesar :', nilai: rata('MAINT'), warna: NADA.in.teks },
+      { teks: `Dan Total Biaya ${tpl.namaOH ?? 'Overhold'} ${nama} sebesar :`, nilai: tot('OH'), warna: NADA.out.teks },
+      { teks: `Dan Total Biaya ${tpl.namaOLI ?? 'Pemakaian OLI'} ${nama} sebesar :`, nilai: tot('OLI'), warna: NADA.warn.teks },
+      { teks: `Dan Total Biaya Lain-Lain ${nama} sebesar :`, nilai: tot('LAIN'), warna: NADA.aset.teks },
+      { teks: `Jadi Grand Total Penggunaan Part ${nama} sebesar :`, nilai: totalKeseluruhan, warna: NADA.in.teks },
+    ];
+  }, [tpl, kunciTpl, labelSite, totalPerSeksi, totalSeksi, mingguList, totalKeseluruhan]);
 
   // Data grafik mode KELUAR: batang bertumpuk per minggu + pie komposisi seksi.
   // Satu garis: total biaya semua kategori per minggu (rincian per kategori ada di kartu & donat).
@@ -871,15 +948,16 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     if (arah === 'OUT') {
       baris.push(['Seksi', 'Alokasi', ...mingguList.map((m) => `Minggu ${m}`), 'Total']);
       for (const s of sectionsAktif) {
-        for (const alokasi of urutkanBarisSeksi(s.key, Object.keys(pivot[s.key]))) {
+        for (const alokasi of urutBaris(s.key, Object.keys(pivot[s.key]))) {
           const data = pivot[s.key][alokasi];
-          baris.push([s.judul, alokasi, ...mingguList.map((m) => String(data[m] ?? 0)),
+          const alias = aliasBaris(s.key, alokasi);
+          baris.push([judulSeksi(s), alias ? `${alokasi} (${alias})` : alokasi, ...mingguList.map((m) => String(data[m] ?? 0)),
             String(Object.values(data).reduce((a, b) => a + b, 0))]);
         }
-        baris.push([s.judul, s.totalLabel, ...mingguList.map((m) => String(totalSeksi[s.key][m] ?? 0)),
+        baris.push([judulSeksi(s), totalLabelSeksi(s), ...mingguList.map((m) => String(totalSeksi[s.key][m] ?? 0)),
           String(totalPerSeksi[s.key])]);
       }
-      baris.push(['', 'Grand Total Price', ...mingguList.map((m) => String(grandTotal[m] ?? 0)), String(totalKeseluruhan)]);
+      baris.push(['', tpl?.grandLabel ?? 'Grand Total Price', ...mingguList.map((m) => String(grandTotal[m] ?? 0)), String(totalKeseluruhan)]);
     } else {
       baris.push(['Tanggal', 'Minggu', 'Kode', 'Nama Barang', 'Jumlah', 'Satuan', arah === 'IN' ? 'Supplier' : 'Alokasi', 'Harga', 'Total Harga', 'No MR', 'Ket']);
       for (const r of rows) {
@@ -1129,34 +1207,50 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
           <div className="glass-panel" style={{ borderRadius: 16, overflowX: 'auto' }}>
             <table className="simple-table wr-tbl" style={{ minWidth: 820, borderCollapse: 'collapse', width: '100%' }}>
               <tbody>
+                {tpl && (
+                  <tr>
+                    <td colSpan={mingguList.length + 2}
+                      style={{ padding: '.8rem .75rem .1rem', fontWeight: 800, fontSize: '.95rem', color: 'var(--txt-primary)' }}>
+                      {tpl.judulSheet} {bulan ? `${NAMA_BULAN[bulan - 1]} ` : ''}{tahun}
+                    </td>
+                  </tr>
+                )}
                 {sectionsAktif.map((s) => (
                   <Fragment key={s.key}>
                     <tr>
                       <td colSpan={mingguList.length + 2}
                         style={{ padding: '.75rem .75rem .45rem', fontWeight: 700, fontSize: '.82rem', color: s.teks, letterSpacing: '.02em' }}>
-                        {s.judul}
+                        {judulSeksi(s)}
                       </td>
                     </tr>
                     <tr>
                       <th style={{ padding: '.4rem .6rem', textAlign: 'left', fontSize: '.7rem', minWidth: 190 }}>
-                        {LABEL_SEKSI[s.key]}{kelompokKegiatan ? ' (per Kegiatan)' : ''}
+                        {kolomSeksi(s.key)}{kelompokKegiatan ? ' (per Kegiatan)' : ''}
                       </th>
                       <th style={{ ...thMinggu, fontWeight: 700 }}>Total</th>
                       {mingguList.map((m) => <th key={m} style={thMinggu}>W{m}</th>)}
                     </tr>
-                    {urutkanBarisSeksi(s.key, Object.keys(pivot[s.key])).map((alokasi) => {
+                    {urutBaris(s.key, Object.keys(pivot[s.key])).map((alokasi) => {
                       const data = pivot[s.key][alokasi];
                       const total = Object.values(data).reduce((a, b) => a + b, 0);
+                      const alias = aliasBaris(s.key, alokasi);
                       return (
                         <tr key={alokasi} className={total ? 'wr-row' : 'wr-row wr-row--kosong'}>
-                          <td style={{ padding: '.4rem .6rem', fontSize: '.75rem', color: total ? 'var(--txt-primary)' : 'var(--wr-txt-muted)' }}>{alokasi}</td>
+                          <td style={{ padding: '.4rem .6rem', fontSize: '.75rem', color: total ? 'var(--txt-primary)' : 'var(--wr-txt-muted)' }}>
+                            {alokasi}
+                            {alias && <span style={{ marginLeft: '.45rem', fontSize: '.68rem', color: 'var(--wr-txt-muted)' }}>{alias}</span>}
+                            {diLuarTemplate(s.key, alokasi) && (
+                              <span title="Alokasi ini tidak ada di template Excel, tetap dihitung ke total"
+                                style={{ marginLeft: '.45rem', fontSize: '.65rem', color: 'var(--wr-txt-muted)', fontStyle: 'italic' }}>(di luar template)</span>
+                            )}
+                          </td>
                           <td style={{ ...tdAngka, fontWeight: 600 }}>{rupiah(total)}</td>
                           {mingguList.map((m) => <td key={m} style={tdAngka}>{rupiah(data[m] ?? 0)}</td>)}
                         </tr>
                       );
                     })}
                     <tr style={{ background: s.bg, fontWeight: 700 }}>
-                      <td style={{ padding: '.45rem .6rem', fontSize: '.75rem' }}>{s.totalLabel}</td>
+                      <td style={{ padding: '.45rem .6rem', fontSize: '.75rem' }}>{totalLabelSeksi(s)}</td>
                       <td style={{ ...tdAngka, color: s.teks }}>{rupiah(totalPerSeksi[s.key])}</td>
                       {mingguList.map((m) => <td key={m} style={tdAngka}>{rupiah(totalSeksi[s.key][m] ?? 0)}</td>)}
                     </tr>
@@ -1164,7 +1258,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
                 ))}
 
                 <tr style={{ background: NADA.in.bg, fontWeight: 800 }}>
-                  <td style={{ padding: '.6rem', fontSize: '.8rem' }}>Grand Total Price</td>
+                  <td style={{ padding: '.6rem', fontSize: '.8rem' }}>{tpl?.grandLabel ?? 'Grand Total Price'}</td>
                   <td style={{ ...tdAngka, color: NADA.in.teks, fontSize: '.8rem' }}>{rupiah(totalKeseluruhan)}</td>
                   {mingguList.map((m) => <td key={m} style={tdAngka}>{rupiah(grandTotal[m] ?? 0)}</td>)}
                 </tr>
@@ -1191,6 +1285,20 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
           </div>
 
           {/* Blok "NB :" seperti pada template Excel */}
+          {barisNb ? (
+            <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginTop: '1rem', fontSize: '.78rem', color: 'var(--wr-txt-muted)', lineHeight: 1.7 }}>
+              <strong style={{ color: 'var(--txt-primary)' }}>NB :</strong>
+              <span style={{ marginLeft: '.4rem' }}>{bulan ? `${NAMA_BULAN[bulan - 1]} ` : ''}{tahun} · {rows.length} baris transaksi keluar{entitas && entitasTersedia.length > 1 ? ` (${LABEL_ENTITAS[entitas]})` : ''}</span>
+              <div style={{ marginTop: '.55rem', display: 'grid', gap: '.5rem' }}>
+                {barisNb.map((b) => (
+                  <div key={b.teks}>
+                    <div>{b.teks}</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 800, color: b.warna, fontVariantNumeric: 'tabular-nums' }}>{rupiahPenuh(b.nilai)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
           <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginTop: '1rem', fontSize: '.78rem', color: 'var(--wr-txt-muted)', lineHeight: 1.7 }}>
             <strong style={{ color: 'var(--txt-primary)' }}>NB:</strong> Total penggunaan Part Maintenance {labelPenuh(labelSite).toUpperCase()}
             {bulan ? ` ${NAMA_BULAN[bulan - 1]}` : ` ${tahun}`} sebesar <strong style={{ color: NADA.in.teks }}>{rupiahPenuh(totalPerSeksi.MAINT)}</strong>;
@@ -1200,6 +1308,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
             {totalPerSeksi.ISOTANK > 0 && <>; biaya ISO Tank <strong style={{ color: NADA.info.teks }}>{rupiahPenuh(totalPerSeksi.ISOTANK)}</strong></>}.
             Grand Total <strong style={{ color: NADA.in.teks }}>{rupiahPenuh(totalKeseluruhan)}</strong> dari {rows.length} baris transaksi keluar{entitas && entitasTersedia.length > 1 ? ` (${LABEL_ENTITAS[entitas]})` : ''}.
           </div>
+          )}
         </>
       )}
 
