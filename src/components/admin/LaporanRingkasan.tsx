@@ -9,10 +9,15 @@
 //     Filter tambahan (dihitung di browser dari kolom `kode`, tanpa endpoint baru):
 //       – Periode : dropdown Semua / minggu tertentu / bulan tertentu → SEMUA angka & grafik Masuk/Keluar
 //                   ikut berubah (total nilai periode itu), bukan hanya grafiknya
-//       – Kode    : I-RDA / I-RCE / I-RET. Kode berawalan angka = kode aset, bukan spare part, jadi tidak
-//                   punya kategori sendiri di sini (tetap ikut terhitung pada pilihan "Semua")
-//   • Outstanding PR        → /outstanding-pr   (seluruh perusahaan)
-//   • Safety Stock          → /min-stock        (seluruh perusahaan)
+//       – Kode    : RDA / RCE / RET / ASET. Kode yang memuat RDA, RCE, atau RET MASUK kelompok itu di posisi
+//                   mana pun (I-RDA-…, SVC-RDA-…, HSE-RDA-…). Kode berawalan angka (kode aset) punya kelompok
+//                   sendiri, ASET, sehingga tidak ikut terhitung saat memilih RDA / RCE / RET.
+//   • Outstanding PR        → /outstanding-pr   (satu sheet seluruh perusahaan, DIFILTER di browser)
+//   • Safety Stock          → /min-stock        (satu sheet seluruh perusahaan, DIFILTER di browser)
+//     Keduanya ikut filter Site dan Kode (RDA / RCE / RET). Pada Safety Stock, memilih periode
+//     minggu (W..) menampilkan pencapaian minggu itu. Sheet tidak punya kolom kode, jadi kode
+//     dibaca dari nama lokasi/kategori — lihat kodeLokasi(). Sheet itu tidak mengenal ASET,
+//     jadi memilih ASET mengosongkan kedua bagian tersebut.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   TrendingUp, TrendingDown, FileText, PackageCheck, ArrowRight, Loader2, Lightbulb, Info, Wallet, Scale, ChevronRight, X,
@@ -47,8 +52,9 @@ const NAMA_BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep
 interface BarisLaporan { minggu: number; bulan: number; totalHarga: number; alokasi: string; section: string; kode: string; tanggal: string | null; site: string; namaBarang: string; id: string; jumlah: number; satuan: string; detailAlokasi?: string; pic?: string }
 interface OsData {
   grand: { pending: number; released: number; total: number };
-  sites: { key: string; label: string; totals: { total: number } }[];
-  history: { label: string; total: number }[];
+  sites: { key: string; label: string; categories?: { name: string; pending: number; released: number; total: number }[]; totals: { pending: number; released: number; total: number } }[];
+  history: { label: string; total: number; perSite?: Record<string, number> }[];
+  categories?: string[];
 }
 type Titik = [number, number | null, number | null, number | null];
 interface MsData {
@@ -67,7 +73,9 @@ const SEKSI: Record<string, { nama: string; warna: string }> = {
 // ── Periode & kategori kode ──────────────────────────────────────────────
 type Granul = 'HARI' | 'MINGGU' | 'BULAN';
 type KodeKat = 'RDA' | 'RCE' | 'RET';
-type FilterKat = 'ALL' | KodeKat;
+/** Kelompok untuk filter "Kode": RDA / RCE / RET, atau ASET (kode berawalan angka). */
+type KelompokKode = KodeKat | 'ASET';
+type FilterKat = 'ALL' | KelompokKode;
 type Pilihan = { jenis: 'ALL' } | { jenis: 'W' | 'B'; n: number };
 
 const KAT_KODE: { key: KodeKat; nama: string; ket: string }[] = [
@@ -75,16 +83,66 @@ const KAT_KODE: { key: KodeKat; nama: string; ket: string }[] = [
   { key: 'RCE', nama: 'RCE', ket: 'Kode berawalan I-RCE' },
   { key: 'RET', nama: 'RET', ket: 'Kode berawalan I-RET' },
 ];
-const NAMA_KAT: Record<FilterKat, string> = { ALL: 'Semua kode', RDA: 'RDA', RCE: 'RCE', RET: 'RET' };
+// Daftar kelompok untuk chip & tabel rincian. (KAT_KODE di atas hanya dipakai merinci Spare Part.)
+const KELOMPOK_KODE: { key: KelompokKode; nama: string; ket: string }[] = [
+  { key: 'RDA', nama: 'RDA', ket: 'Kode memuat RDA (I-RDA, SVC-RDA, HSE-RDA, …)' },
+  { key: 'RCE', nama: 'RCE', ket: 'Kode memuat RCE (I-RCE, SVC-RCE, …)' },
+  { key: 'RET', nama: 'RET', ket: 'Kode memuat RET (I-RET, …)' },
+  { key: 'ASET', nama: 'ASET', ket: 'Kode berawalan angka (kode aset)' },
+];
+const NAMA_KAT: Record<FilterKat, string> = { ALL: 'Semua kode', RDA: 'RDA', RCE: 'RCE', RET: 'RET', ASET: 'ASET' };
 const NAMA_BULAN_PENUH = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
 // Awalan "I-" boleh tidak ada; huruf sesudah RDA/RCE/RET tidak boleh langsung huruf lagi
 // supaya kode kontainer ISO Tank (mis. RDAU1581209) tidak ikut terhitung sebagai RDA.
 // Kode berawalan angka (mis. 01.11-2026-0033) adalah kode ASET → bukan RDA/RCE/RET → null.
+// Pola ini (berawalan) HANYA dipakai menentukan Spare Part — lihat peruntukan(). Untuk filter Kode dipakai kelompokKode().
 const POLA_KAT = /^(?:I-?)?(RDA|RCE|RET)(?![A-Z])/;
 function kategoriKode(kode: string): KodeKat | null {
   const m = POLA_KAT.exec(normKode(kode));
   return m ? (m[1] as KodeKat) : null;
+}
+
+// Kelompok kode untuk filter. Kode aset (berawalan angka) → ASET. Selain itu RDA/RCE/RET dicari di MANA PUN dalam kode,
+// asal berdiri sendiri (tidak diapit huruf): "SVC-RDA-00001" dan "HSE-RDA-00058" → RDA, tetapi kode kontainer ISO Tank
+// "RDAU1581209" tidak (huruf U langsung sesudah RDA). "I" tanpa tanda hubung ("IRDA0001") tetap dikenali.
+// null = tidak masuk kelompok mana pun (mis. kode "HSE-00013" tanpa RDA/RCE/RET, atau tanpa kode).
+const POLA_KELOMPOK = /(?:^I?|[^A-Z])(RDA|RCE|RET)(?![A-Z])/;
+function kelompokKode(kode: string): KelompokKode | null {
+  const k = normKode(kode);
+  if (/^\d/.test(k)) return 'ASET';
+  const m = POLA_KELOMPOK.exec(k);
+  return m ? (m[1] as KodeKat) : null;
+}
+
+// ── Kode & site untuk data satu-sheet (Outstanding PR, Safety Stock) ─────────
+// Sheet tidak punya kolom kode, jadi kode dibaca dari teks lokasi/kategori:
+//   1. token eksplisit RDA / RCE / RET di nama lokasi, lalu di nama kategori
+//   2. tidak ada → "MS" (Mother Station) dan "LNG" dianggap RDA, "WS" (Workshop) dianggap RCE
+//   3. selain itu null (hanya tampil pada pilihan "Semua")
+// Ubah di sini bila penamaan di sheet berbeda.
+const POLA_EKSPLISIT = /\b(RDA|RCE|RET)\b/i;
+function kodeLokasi(kategori: string, lokasi: string): KodeKat | null {
+  for (const t of [lokasi, kategori]) {
+    const m = POLA_EKSPLISIT.exec(t || '');
+    if (m) return m[1].toUpperCase() as KodeKat;
+  }
+  const l = ` ${lokasi || ''} `;
+  if (/\b(MS|LNG)\b/i.test(l)) return 'RDA';
+  if (/\bWS\b/i.test(l)) return 'RCE';
+  return null;
+}
+// Sama dengan server (siteAccess.js): RET/RDA sengaja TIDAK dibuang, karena lokasi "RET" di sheet harus cocok dengan site "RET Jepara".
+const AWALAN_LOKASI = new Set(['rce', 'ms', 'ws', 'lng']);
+const tokenLokasi = (s: string) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter(Boolean);
+/** Cocokkan nama lokasi di sheet ("RCE MS Setu", "WS Cibungur") dengan site terpilih — sama dengan aturan server. */
+function lokasiCocokSite(nama: string, labelSite: string, keySite: string): boolean {
+  let a = tokenLokasi(nama).filter((t) => !AWALAN_LOKASI.has(t));
+  const targets = [labelSite, keySite].map((x) => tokenLokasi(x).filter((t) => !AWALAN_LOKASI.has(t))).filter((x) => x.length);
+  if (!a.length) a = tokenLokasi(nama);            // mis. lokasi "RET" saja
+  if (!a.length || !targets.length) return false;
+  const sa = new Set(a);
+  return targets.some((b) => { const sb = new Set(b); return a.every((t) => sb.has(t)) || b.every((t) => sa.has(t)); });
 }
 
 /** Nilai dropdown periode: "ALL", "W:12" (minggu 12) atau "B:3" (bulan Maret). */
@@ -616,8 +674,8 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
   // ── Filter berlapis ──
   // K = hanya kode · P = hanya periode · (tanpa akhiran) = kode + periode → dipakai semua angka & grafik.
   const pilihan = useMemo(() => parsePilihan(pilihanKey), [pilihanKey]);
-  const masukK = useMemo(() => (kat === 'ALL' ? masukAll : masukAll.filter((r) => kategoriKode(r.kode) === kat)), [masukAll, kat]);
-  const keluarK = useMemo(() => (kat === 'ALL' ? keluarAll : keluarAll.filter((r) => kategoriKode(r.kode) === kat)), [keluarAll, kat]);
+  const masukK = useMemo(() => (kat === 'ALL' ? masukAll : masukAll.filter((r) => kelompokKode(r.kode) === kat)), [masukAll, kat]);
+  const keluarK = useMemo(() => (kat === 'ALL' ? keluarAll : keluarAll.filter((r) => kelompokKode(r.kode) === kat)), [keluarAll, kat]);
   const masukP = useMemo(() => masukAll.filter((r) => lolosPilihan(r, pilihan)), [masukAll, pilihan]);
   const keluarP = useMemo(() => keluarAll.filter((r) => lolosPilihan(r, pilihan)), [keluarAll, pilihan]);
   const masuk = useMemo(() => masukK.filter((r) => lolosPilihan(r, pilihan)), [masukK, pilihan]);
@@ -647,16 +705,16 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
     return { minggu: susun((r) => r.minggu), bulan: susun((r) => r.bulan) };
   }, [masukK, keluarK]);
 
-  // Rincian per kategori — ikut periode, tetapi selalu memperlihatkan RDA/RCE/RET sekaligus.
-  const perKat = useMemo(() => KAT_KODE.map((c) => {
-    const im = masukP.filter((r) => kategoriKode(r.kode) === c.key);
-    const ik = keluarP.filter((r) => kategoriKode(r.kode) === c.key);
+  // Rincian per kategori — ikut periode, tetapi selalu memperlihatkan RDA/RCE/RET/ASET sekaligus.
+  const perKat = useMemo(() => KELOMPOK_KODE.map((c) => {
+    const im = masukP.filter((r) => kelompokKode(r.kode) === c.key);
+    const ik = keluarP.filter((r) => kelompokKode(r.kode) === c.key);
     return { ...c, masuk: jumlah(im), keluar: jumlah(ik), barisMasuk: im.length, barisKeluar: ik.length };
   }), [masukP, keluarP]);
-  // Baris di luar RDA/RCE/RET (terutama kode aset berawalan angka) — hanya dihitung pada pilihan "Semua".
+  // Baris yang tidak masuk RDA/RCE/RET/ASET (kode tanpa penanda entitas, atau tanpa kode) — hanya dihitung pada pilihan "Semua".
   const luarKat = useMemo(() => {
-    const im = masukP.filter((r) => kategoriKode(r.kode) === null);
-    const ik = keluarP.filter((r) => kategoriKode(r.kode) === null);
+    const im = masukP.filter((r) => kelompokKode(r.kode) === null);
+    const ik = keluarP.filter((r) => kelompokKode(r.kode) === null);
     return { masuk: jumlah(im), keluar: jumlah(ik), baris: im.length + ik.length };
   }, [masukP, keluarP]);
 
@@ -684,32 +742,53 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
   // ── Perbandingan masuk vs keluar ──
   const perbandingan = useMemo(() => deretGabung(masuk, keluar, granulBanding), [masuk, keluar, granulBanding]);
 
+  // ── Filter Site + Kode untuk Outstanding PR & Safety Stock ──
+  const labelSiteAktif = useMemo(() => (siteAktif === 'global' ? '' : (sites.find((x) => x.key === siteAktif)?.label ?? siteAktif)), [siteAktif, sites]);
+  const lolosLokasi = (kategori: string, lokasi: string) =>
+    (kat === 'ALL' || kodeLokasi(kategori, lokasi) === kat)
+    && (siteAktif === 'global' || lokasiCocokSite(lokasi, labelSiteAktif, siteAktif));
+
   // ── Outstanding PR ──
   const pr = useMemo(() => {
     if (!os) return null;
-    const siteTop = [...os.sites].sort((a, b) => b.totals.total - a.totals.total)[0];
+    const sitesF = os.sites.filter((x) => lolosLokasi('', x.label));
+    if (!sitesF.length) return null;
+    const jml = sitesF.reduce((a, x) => ({ pending: a.pending + x.totals.pending, released: a.released + x.totals.released, total: a.total + x.totals.total }), { pending: 0, released: 0, total: 0 });
+    const siteTop = [...sitesF].sort((a, b) => b.totals.total - a.totals.total)[0];
+    const label = new Set(sitesF.map((x) => x.label));
+    const saring = kat !== 'ALL' || siteAktif !== 'global';
+    const deret = os.history
+      .map((h) => ({ label: h.label, Nilai: saring ? Object.entries(h.perSite ?? {}).filter(([l]) => label.has(l)).reduce((t, [, v]) => t + (Number(v) || 0), 0) : h.total, ada: !saring || !!h.perSite }))
+      .filter((h) => h.ada).map(({ label: lb, Nilai }) => ({ label: lb, Nilai }));
     return {
-      total: os.grand.total, pending: os.grand.pending, released: os.grand.released,
-      persenPending: os.grand.total > 0 ? (os.grand.pending / os.grand.total) * 100 : 0,
-      siteTop, deret: os.history.map((h) => ({ label: h.label, Nilai: h.total })),
+      total: jml.total, pending: jml.pending, released: jml.released,
+      persenPending: jml.total > 0 ? (jml.pending / jml.total) * 100 : 0,
+      siteTop, jumlahSite: sitesF.length, deret,
     };
-  }, [os]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [os, kat, siteAktif, labelSiteAktif]);
 
   // ── Safety stock ──
   const ss = useMemo(() => {
     if (!ms) return null;
     const nW = ms.weeks.length;
+    const baris = ms.groups.flatMap((g) => g.rows.filter((r) => lolosLokasi(g.category, r.location)));
+    if (!baris.length) return null;
     const seri = Array.from({ length: nW }, (_, i) => {
       let min = 0, real = 0, ada = false;
-      for (const g of ms.groups) for (const r of g.rows) { const t = r.v[i]; if (t) { min += t[0]; real += t[1] ?? 0; ada = true; } }
-      return ada && min > 0 ? { label: ms.weeks[i].label, Nilai: (real / min) * 100, i } : null;
-    }).filter((x): x is { label: string; Nilai: number; i: number } => x !== null);
+      for (const r of baris) { const t = r.v[i]; if (t) { min += t[0]; real += t[1] ?? 0; ada = true; } }
+      return ada && min > 0 && real > 0 ? { label: ms.weeks[i].label, n: ms.weeks[i].n, Nilai: (real / min) * 100, i } : null;
+    }).filter((x): x is { label: string; n: number; Nilai: number; i: number } => x !== null);
     if (!seri.length) return null;
-    const akhir = seri[seri.length - 1];
-    const sebelumnya = seri[seri.length - 2];
-    // Pencapaian per lokasi pada minggu terakhir (kedua kategori dijumlahkan).
+    // Periode minggu (W..) memilih minggu itu; selain itu minggu terakhir yang terisi.
+    const pos = pilihan.jenis === 'W' ? seri.findIndex((x) => x.n === pilihan.n) : -1;
+    const idx = pos >= 0 ? pos : seri.length - 1;
+    const akhir = seri[idx];
+    const sebelumnya = seri[idx - 1];
+    // Pencapaian per lokasi pada minggu yang ditampilkan (semua kategori dijumlahkan).
     const lok = new Map<string, { min: number; real: number }>();
     for (const g of ms.groups) for (const r of g.rows) {
+      if (!lolosLokasi(g.category, r.location)) continue;
       const t = r.v[akhir.i]; if (!t) continue;
       const c = lok.get(r.location) ?? { min: 0, real: 0 };
       c.min += t[0]; c.real += t[1] ?? 0; lok.set(r.location, c);
@@ -718,10 +797,11 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
     const target = ms.target || 100;
     return {
       pct: akhir.Nilai, label: akhir.label, target, delta: sebelumnya ? akhir.Nilai - sebelumnya.Nilai : null,
-      tingkat: tingkat(akhir.Nilai, target), terendah: daftar[0],
+      tingkat: tingkat(akhir.Nilai, target), terendah: daftar[0], tertinggi: daftar[daftar.length - 1],
       dibawahTarget: daftar.filter((d) => d.pct < target * 0.9).length, jumlahLokasi: daftar.length, deret: seri.map((x) => ({ label: x.label, Nilai: Math.round(x.Nilai * 10) / 10 })),
     };
-  }, [ms]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ms, kat, siteAktif, labelSiteAktif, pilihan]);
 
   // ── Poin penting ──
   const poin = useMemo(() => {
@@ -787,7 +867,7 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
         ))}
       </div>
       <p className="lr-note"><Info size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
-        Barang Masuk &amp; Barang Keluar mengikuti filter site, tahun, periode, dan kode ({labelLingkup}, {labelPeriode}{kat !== 'ALL' ? `, kode ${NAMA_KAT[kat]}` : ''}). Outstanding PR dan Safety Stock mencakup seluruh perusahaan dan <b>tidak</b> ikut filter periode maupun kode.</p>
+        Barang Masuk &amp; Barang Keluar mengikuti filter site, tahun, periode, dan kode ({labelLingkup}, {labelPeriode}{kat !== 'ALL' ? `, kode ${NAMA_KAT[kat]}` : ''}). Outstanding PR dan Safety Stock ikut filter site dan kode; periode hanya berlaku untuk Safety Stock (pilih minggu W..), sedangkan Outstanding PR selalu data terbaru.</p>
 
       {gagal.length > 0 && (
         <div className="glass-panel" style={{ borderRadius: 14, padding: '.7rem 1rem', marginBottom: '1rem', fontSize: '.78rem', color: NADA.neg.teks }}>
@@ -841,7 +921,7 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
           )}
         </Kartu>
 
-        <Kartu ikon={FileText} nada={NADA.aset} judul="Outstanding PR" sub="PR yang belum selesai · seluruh perusahaan" onDetail={() => onBuka('OS_PR')}>
+        <Kartu ikon={FileText} nada={NADA.aset} judul="Outstanding PR" sub={`PR yang belum selesai · ${labelLingkup}${tagKat}`} onDetail={() => onBuka('OS_PR')}>
           {pr ? (
             <>
               <div className="lr-utama"><b>{angka(pr.total)} PR</b><span>{fmtP(pr.persenPending, 0)} menunggu approval</span></div>
@@ -849,13 +929,13 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
               <div className="lr-fakta-wrap">
                 <Fakta label="Pending approval" nilai={angka(pr.pending)} />
                 <Fakta label="Released" nilai={angka(pr.released)} />
-                <Fakta label="Site terbanyak" nilai={pr.siteTop ? `${pr.siteTop.label} · ${angka(pr.siteTop.totals.total)} PR` : '–'} />
+                <Fakta label={`Site terbanyak (dari ${angka(pr.jumlahSite)})`} nilai={pr.siteTop ? `${pr.siteTop.label} · ${angka(pr.siteTop.totals.total)} PR` : '–'} />
               </div>
             </>
-          ) : <div className="lr-nodata" style={{ minHeight: 150 }}>Belum ada data Outstanding PR. Sinkronkan sumbernya di sub-menu.</div>}
+          ) : <div className="lr-nodata" style={{ minHeight: 150 }}>{os ? 'Tidak ada data Outstanding PR untuk site/kode yang dipilih.' : 'Belum ada data Outstanding PR. Sinkronkan sumbernya di sub-menu.'}</div>}
         </Kartu>
 
-        <Kartu ikon={PackageCheck} nada={ss ? NADA_TINGKAT[ss.tingkat] : NADA.neutral} judul="Pencapaian Safety Stock" sub="Item yang sudah memenuhi minimum stock · seluruh perusahaan" onDetail={() => onBuka('MIN_STOCK')}>
+        <Kartu ikon={PackageCheck} nada={ss ? NADA_TINGKAT[ss.tingkat] : NADA.neutral} judul="Pencapaian Safety Stock" sub={`Item yang sudah memenuhi minimum stock · ${labelLingkup}${tagKat}${pilihan.jenis === 'W' && ss ? ` · ${ss.label}` : ''}`} onDetail={() => onBuka('MIN_STOCK')}>
           {ss ? (
             <>
               <div className="lr-utama">
@@ -870,7 +950,7 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
                 <Fakta label="Lokasi terendah" nilai={ss.terendah ? `${ss.terendah.nama} · ${fmtP(ss.terendah.pct)}` : '–'} />
               </div>
             </>
-          ) : <div className="lr-nodata" style={{ minHeight: 150 }}>Belum ada data Safety Stock. Sinkronkan sumbernya di sub-menu.</div>}
+          ) : <div className="lr-nodata" style={{ minHeight: 150 }}>{ms ? 'Tidak ada data Safety Stock untuk site/kode yang dipilih.' : 'Belum ada data Safety Stock. Sinkronkan sumbernya di sub-menu.'}</div>}
         </Kartu>
       </div>
 
@@ -904,7 +984,7 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
       {/* ── Rincian per kategori kode ── */}
       <section className="glass-panel" style={{ borderRadius: 18, padding: '1rem 1.1rem', marginBottom: '1rem' }} aria-label="Rincian nilai per kategori kode">
         <h3 className="lr-judul">Rincian per Kategori Kode · {labelPeriode}</h3>
-        <p className="lr-sub" style={{ margin: '.2rem 0 .6rem' }}>Klik kode untuk memfilter seluruh halaman. Angka di tabel ini mengikuti periode yang dipilih dan selalu menampilkan RDA, RCE, dan RET sekaligus.</p>
+        <p className="lr-sub" style={{ margin: '.2rem 0 .6rem' }}>Klik kode untuk memfilter seluruh halaman. Angka di tabel ini mengikuti periode yang dipilih dan selalu menampilkan RDA, RCE, RET, dan ASET sekaligus.</p>
         <div className="lr-scroll">
           <table className="lr-rinci">
             <thead><tr><th>Kode</th><th>Barang Masuk</th><th>Barang Keluar</th><th>Selisih</th><th>Baris</th></tr></thead>
@@ -926,7 +1006,7 @@ export function LaporanRingkasan({ auth, onBuka }: Props) {
         </div>
         <p className="lr-sub" style={{ margin: '.55rem 0 0' }}>
           Kolom Baris = jumlah baris masuk / keluar.
-          {luarKat.baris > 0 && <> Baris berkode angka (kode aset) tidak termasuk RDA/RCE/RET: {angka(luarKat.baris)} baris, masuk {rp(luarKat.masuk)} · keluar {rp(luarKat.keluar)} — hanya ikut terhitung pada pilihan “Semua”.</>}
+          {luarKat.baris > 0 && <> Baris tanpa penanda RDA/RCE/RET dan bukan kode aset: {angka(luarKat.baris)} baris, masuk {rp(luarKat.masuk)} · keluar {rp(luarKat.keluar)} — hanya ikut terhitung pada pilihan “Semua”.</>}
         </p>
       </section>
 

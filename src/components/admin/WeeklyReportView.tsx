@@ -21,7 +21,9 @@ import type { KelasAset, Klasifikasi } from './asetKlasifikasi';
 import { KartuKelas, BadgeKategori, Segmen } from './AsetKlasifikasiUi';
 import { NADA_KELAS, IKON_KELAS, ikonSub } from './asetKlasifikasiTema';
 import { TEMPLATE_SITE, kunciTemplate, cocokkanBarisTemplate, barisLainDariKode } from './weeklyTemplate';
-import type { SeksiTemplate } from './weeklyTemplate';
+import type { SeksiTemplate, TemplateSite } from './weeklyTemplate';
+import { buatXlsxKeluar, namaFileKeluar } from './weeklyExportKeluar';
+import type { BarisLaporan, SeksiExport, NbExport } from './weeklyExportKeluar';
 
 type BarisAset = WeeklyRow & Klasifikasi;
 import {
@@ -181,6 +183,18 @@ const SITE_HANYA_LAIN_ISOTANK = new Set<string>(['sangkulirang']);
 function kunciBarisPivot(r: WeeklyRow): string {
   if (!SITE_KELOMPOK_KEGIATAN.has(r.site)) return r.alokasi;
   return r.detailAlokasi.trim() || '(Tanpa Detail Alokasi)';
+}
+/**
+ * Baris tabel laporan tempat sebuah transaksi dijumlahkan. Dipakai tabel di layar DAN export Excel,
+ * supaya angkanya selalu sama. Site bertemplate: seksi Lain-Lain ditentukan KODE biaya (R → Jasa Service & Repair, …),
+ * seksi lain mengikuti nama alokasi (mesin) yang cocok dengan baris template; sisanya alokasi aslinya.
+ */
+function kunciBarisLaporan(r: WeeklyRow, tpl: TemplateSite | null): string {
+  const kunci = kunciBarisPivot(r);
+  const t = tpl?.seksi.find((x) => x.key === r.section);
+  if (!t) return kunci;
+  const baris = r.section === 'LAIN' ? barisLainDariKode(t, r.kodeBiaya ?? '') : null;
+  return baris ?? cocokkanBarisTemplate(t, r.alokasi) ?? kunci;
 }
 // ── Entitas pemilik transaksi: RDA / RCE / RET ────────────────────────────
 // Satu site bisa memakai beberapa entitas (PT) sekaligus, masing-masing punya
@@ -486,15 +500,8 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       for (const s of SECTIONS) for (const a of BARIS_UNIVERSAL[s.key]) p[s.key][a] = {};
     }
     for (const r of rows) {
-      let kunci = kunciBarisPivot(r);
-      const t = tpl?.seksi.find((x) => x.key === r.section);
       // Alokasi yang tak ada di template tetap dihitung (baris tambahan di bawah), supaya total tidak hilang.
-      if (t) {
-        // Lain-Lain: baris ditentukan KODE (R → Jasa Service & Repair, N → Jasa New Instalasi, dst), bukan nama alokasi.
-        // Seksi lain (MH/OH/OLI): baris = alokasi (mesin) yang sesuai.
-        const baris = r.section === 'LAIN' ? barisLainDariKode(t, r.kodeBiaya ?? '') : null;
-        kunci = baris ?? cocokkanBarisTemplate(t, r.alokasi) ?? kunci;
-      }
+      const kunci = kunciBarisLaporan(r, tpl);
       const bucket = (p[r.section][kunci] ??= {});
       bucket[r.minggu] = (bucket[r.minggu] ?? 0) + r.totalHarga;
     }
@@ -555,34 +562,34 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   };
 
   // Blok "NB :" di bawah tabel — kalimatnya mengikuti sheet Excel masing-masing site.
-  const barisNb = useMemo((): { teks: string; nilai: number; warna: string }[] | null => {
+  const barisNb = useMemo((): (NbExport & { nilai: number; warna: string })[] | null => {
     if (!tpl || !kunciTpl) return null;
     const nama = labelPenuh(labelSite).toUpperCase();
     const tot = (k: Section) => totalPerSeksi[k] ?? 0;
     const rata = (k: Section) => (mingguList.length ? mingguList.reduce((t, m) => t + (totalSeksi[k][m] ?? 0), 0) / mingguList.length : 0);
     if (kunciTpl === 'sangkulirang') {
       return [
-        { teks: `Total penggunaan Part Maintenance ISO Tank ${nama} sebesar :`, nilai: tot('ISOTANK'), warna: NADA.info.teks },
-        { teks: 'Dengan Rata-rata penggunaan Part Maintenance ISO Tank Sebesar :', nilai: rata('ISOTANK'), warna: NADA.info.teks },
-        { teks: `Grand Total penggunaan Part ${nama} sebesar :`, nilai: totalKeseluruhan, warna: NADA.in.teks },
+        { teks: `Total penggunaan Part Maintenance ISO Tank ${nama} sebesar :`, jenis: 'total', seksi: 'ISOTANK', nilai: tot('ISOTANK'), warna: NADA.info.teks },
+        { teks: 'Dengan Rata-rata penggunaan Part Maintenance ISO Tank Sebesar :', jenis: 'rata', seksi: 'ISOTANK', nilai: rata('ISOTANK'), warna: NADA.info.teks },
+        { teks: `Grand Total penggunaan Part ${nama} sebesar :`, jenis: 'grand', nilai: totalKeseluruhan, warna: NADA.in.teks },
       ];
     }
     if (kunciTpl === 'ret') {
       return [
-        { teks: `Total penggunaan Part Maintenance ${nama} sebesar :`, nilai: tot('MAINT'), warna: NADA.in.teks },
-        { teks: `Total penggunaan part Overhaul ${nama} sebesar :`, nilai: tot('OH'), warna: NADA.out.teks },
-        { teks: `Total penggunaan Oli ${nama} sebesar :`, nilai: tot('OLI'), warna: NADA.warn.teks },
-        { teks: `Total penggunaan lain-lain ${nama} sebesar :`, nilai: tot('LAIN'), warna: NADA.aset.teks },
-        { teks: `Grand Total penggunaan Part ${nama} sebesar :`, nilai: totalKeseluruhan, warna: NADA.in.teks },
+        { teks: `Total penggunaan Part Maintenance ${nama} sebesar :`, jenis: 'total', seksi: 'MAINT', nilai: tot('MAINT'), warna: NADA.in.teks },
+        { teks: `Total penggunaan part Overhaul ${nama} sebesar :`, jenis: 'total', seksi: 'OH', nilai: tot('OH'), warna: NADA.out.teks },
+        { teks: `Total penggunaan Oli ${nama} sebesar :`, jenis: 'total', seksi: 'OLI', nilai: tot('OLI'), warna: NADA.warn.teks },
+        { teks: `Total penggunaan lain-lain ${nama} sebesar :`, jenis: 'total', seksi: 'LAIN', nilai: tot('LAIN'), warna: NADA.aset.teks },
+        { teks: `Grand Total penggunaan Part ${nama} sebesar :`, jenis: 'grand', nilai: totalKeseluruhan, warna: NADA.in.teks },
       ];
     }
     return [
-      { teks: `Total penggunaan Part Maintenance ${nama} sebesar :`, nilai: tot('MAINT'), warna: NADA.in.teks },
-      { teks: 'Dengan Rata-rata penggunaan Part Maintenance Sebesar :', nilai: rata('MAINT'), warna: NADA.in.teks },
-      { teks: `Dan Total Biaya ${tpl.namaOH ?? 'Overhold'} ${nama} sebesar :`, nilai: tot('OH'), warna: NADA.out.teks },
-      { teks: `Dan Total Biaya ${tpl.namaOLI ?? 'Pemakaian OLI'} ${nama} sebesar :`, nilai: tot('OLI'), warna: NADA.warn.teks },
-      { teks: `Dan Total Biaya Lain-Lain ${nama} sebesar :`, nilai: tot('LAIN'), warna: NADA.aset.teks },
-      { teks: `Jadi Grand Total Penggunaan Part ${nama} sebesar :`, nilai: totalKeseluruhan, warna: NADA.in.teks },
+      { teks: `Total penggunaan Part Maintenance ${nama} sebesar :`, jenis: 'total', seksi: 'MAINT', nilai: tot('MAINT'), warna: NADA.in.teks },
+      { teks: 'Dengan Rata-rata penggunaan Part Maintenance Sebesar :', jenis: 'rata', seksi: 'MAINT', nilai: rata('MAINT'), warna: NADA.in.teks },
+      { teks: `Dan Total Biaya ${tpl.namaOH ?? 'Overhold'} ${nama} sebesar :`, jenis: 'total', seksi: 'OH', nilai: tot('OH'), warna: NADA.out.teks },
+      { teks: `Dan Total Biaya ${tpl.namaOLI ?? 'Pemakaian OLI'} ${nama} sebesar :`, jenis: 'total', seksi: 'OLI', nilai: tot('OLI'), warna: NADA.warn.teks },
+      { teks: `Dan Total Biaya Lain-Lain ${nama} sebesar :`, jenis: 'total', seksi: 'LAIN', nilai: tot('LAIN'), warna: NADA.aset.teks },
+      { teks: `Jadi Grand Total Penggunaan Part ${nama} sebesar :`, jenis: 'grand', nilai: totalKeseluruhan, warna: NADA.in.teks },
     ];
   }, [tpl, kunciTpl, labelSite, totalPerSeksi, totalSeksi, mingguList, totalKeseluruhan]);
 
@@ -943,6 +950,41 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     finally { setMengekspor(false); }
   };
 
+  // Export Laporan Mingguan (Barang Keluar): Excel berisi tabel template (rumus SUMIFS), data detail, dan rekap per minggu.
+  // Disusun di browser dari data yang sedang tampil, jadi isinya persis sama dengan tabel di layar.
+  const [mingguExport, setMingguExport] = useState<number | 0>(0);
+  useEffect(() => { setMingguExport(0); }, [site, tahun, bulan, arah, entitas]);
+  const unduhLaporanKeluar = async () => {
+    setMengekspor(true); setPesan(null);
+    try {
+      const seksiExport: SeksiExport[] = sectionsAktif.map((s) => ({
+        key: s.key, judul: judulSeksi(s), labelKolom: kolomSeksi(s.key), totalLabel: totalLabelSeksi(s),
+        baris: urutBaris(s.key, Object.keys(pivot[s.key])).map((label) => ({ label, alias: aliasBaris(s.key, label) })),
+      }));
+      const dasar = mingguExport ? rows.filter((r) => r.minggu === mingguExport) : rows;
+      const baris: BarisLaporan[] = dasar.map((r) => ({
+        minggu: r.minggu, tanggal: r.tanggal, bulan: r.bulan, tahun: r.tahun, kode: r.kode, namaBarang: r.namaBarang,
+        jumlah: r.jumlah, satuan: r.satuan, alokasi: r.alokasi, detailAlokasi: r.detailAlokasi, pic: r.pic, harga: r.harga,
+        totalHarga: r.totalHarga, noMr: r.noMr, keterangan: r.keterangan, kodeBiaya: r.kodeBiaya ?? '',
+        section: r.section, baris: kunciBarisLaporan(r, tpl),
+      }));
+      const opsi = {
+        namaSite: labelPenuh(labelSite), judulSheet: tpl?.judulSheet ?? `Inventory ${labelPenuh(labelSite)}`,
+        tahun, bulan, minggu: mingguExport, seksi: seksiExport, grandLabel: tpl?.grandLabel ?? 'Grand Total Price',
+        rows: baris, mingguList: mingguExport ? [mingguExport] : mingguList, volumes,
+        nb: barisNb ? barisNb.map(({ teks, jenis, seksi }) => ({ teks, jenis, seksi })) : null,
+      };
+      const blob = await buatXlsxKeluar(opsi);
+      const namaFile = namaFileKeluar(opsi);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = namaFile; a.click();
+      URL.revokeObjectURL(url);
+      setPesan({ tipe: 'ok', teks: `${namaFile} diunduh — sheet “Week”, “Per Minggu”, dan “Report”${mingguExport ? ` (hanya Minggu ${mingguExport})` : ''}. Angka di sheet Week & Per Minggu adalah rumus yang menunjuk ke sheet Report.` });
+    } catch (err) { setPesan({ tipe: 'error', teks: (err as Error).message }); }
+    finally { setMengekspor(false); }
+  };
+
   const unduhCsv = () => {
     const baris: string[][] = [];
     if (arah === 'OUT') {
@@ -1076,6 +1118,19 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
           <button type="button" className="wr-btn" onClick={() => setKelolaBuka(true)} title={`Cari, ubah, salin, atau hapus ${arah === 'IN' ? 'Barang Masuk' : 'Barang Keluar'} — ikut tersinkron ke Google Sheet`} style={tombol}>
             <ListChecks size={15} /> Kelola Data
           </button>
+        )}
+        {arah === 'OUT' && mingguList.length > 0 && (
+          <>
+            <select value={mingguExport} onChange={(e) => setMingguExport(Number(e.target.value))} className="wr-ctl" style={kontrol}
+              title="Pilih satu minggu untuk diekspor, atau semua minggu">
+              <option value={0}>Semua Minggu</option>
+              {mingguList.map((m) => <option key={m} value={m}>Minggu {m}</option>)}
+            </select>
+            <button type="button" className="wr-btn" onClick={() => void unduhLaporanKeluar()} disabled={mengekspor || kosong} style={tombol}
+              title="Unduh Excel mengikuti template laporan (tabel per minggu + data detail + rekap per minggu)">
+              <Download size={15} /> Export Laporan
+            </button>
+          </>
         )}
         <button type="button" className="wr-btn" onClick={arah === 'ASET' ? unduhCsv : () => void unduhExcel()} disabled={mengekspor} aria-busy={mengekspor || undefined} style={tombol}
           title={arah === 'ASET' ? 'Unduh daftar aset (CSV)' : 'Unduh Excel dengan template yang sama seperti sheet sumber'}>
