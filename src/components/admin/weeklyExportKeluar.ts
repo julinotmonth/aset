@@ -24,10 +24,16 @@ export interface BarisLaporan {
 
 export interface SeksiExport {
   key: SeksiKey; judul: string; labelKolom: string; totalLabel: string;
+  /** Kode biaya sheet (MH/OH/DF/O) — ditulis di kolom A tiap baris bila baris tak punya alias (seperti kolom A \"Week Workshop Jabar\"). */
+  kode?: string;
   baris: { label: string; alias?: string }[];
 }
 
-export interface NbExport { teks: string; jenis: 'total' | 'rata' | 'grand'; seksi?: SeksiKey }
+/**
+ * total = total seksi · rata = rata-rata total seksi per minggu · grand = Grand Total ·
+ * terakhir = Grand Total minggu terakhir · rataGrand = rata-rata Grand Total per minggu.
+ */
+export interface NbExport { teks: string; jenis: 'total' | 'rata' | 'grand' | 'terakhir' | 'rataGrand'; seksi?: SeksiKey }
 
 export interface OpsiExportKeluar {
   /** Mis. "MS Wunut" — dipakai untuk nama sheet. */
@@ -48,8 +54,15 @@ export interface OpsiExportKeluar {
 }
 
 const NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-const KODE_SEKSI: Record<SeksiKey, string> = { MAINT: 'MH', OH: 'OH', OLI: 'OLI', LAIN: 'LAIN', ISOTANK: 'ISOTANK' };
-const URUT_SEKSI: SeksiKey[] = ['MAINT', 'OH', 'OLI', 'LAIN', 'ISOTANK'];
+// Kunci seksi di kolom \"Seksi\" sheet Report (kunci SUMIFS). Tiap seksi punya kunci sendiri — di Workshop Jabar
+// banyak seksi berkode biaya sama (MH), jadi kuncinya bukan kode biaya.
+const KODE_SEKSI: Record<SeksiKey, string> = {
+  MAINT: 'MH', OH: 'OH', OLI: 'OLI', LAIN: 'LAIN', ISOTANK: 'ISOTANK',
+  HT: 'HT', OHHT: 'OHHT', TS10: 'TS10', TS20: 'TS20', TS40: 'TS40', BT: 'BT', PRS: 'PRS', KSO: 'KSO', DF: 'DF',
+  TOOLS: 'TOOLS', OTHERS: 'OTHERS',
+};
+const URUT_SEKSI: SeksiKey[] = ['MAINT', 'OH', 'OLI', 'LAIN', 'ISOTANK',
+  'HT', 'OHHT', 'TS10', 'TS20', 'TS40', 'BT', 'PRS', 'KSO', 'DF', 'TOOLS', 'OTHERS'];
 
 const FONT = 'Arial';
 const HIJAU = 'FF0B6B4F';
@@ -60,9 +73,13 @@ const FMT_RP = '"Rp "#,##0;-"Rp "#,##0;"-"';
 const FMT_RP_DESIMAL = '"Rp "#,##0.00;-"Rp "#,##0.00;"-"';
 const WARNA_SEKSI: Record<SeksiKey, string> = {
   MAINT: 'FF0B6B4F', OH: 'FF1D4ED8', OLI: 'FF9A5B00', LAIN: 'FF6D28D9', ISOTANK: 'FF0E7490',
+  HT: 'FF0B6B4F', OHHT: 'FF1D4ED8', TS10: 'FF0E7490', TS20: 'FF9A5B00', TS40: 'FF6D28D9', BT: 'FF475569', PRS: 'FF0B6B4F',
+  KSO: 'FF1D4ED8', DF: 'FF9A5B00', TOOLS: 'FF6D28D9', OTHERS: 'FF0E7490',
 };
 const BG_TOTAL: Record<SeksiKey, string> = {
   MAINT: 'FFE6F4EE', OH: 'FFE3ECFB', OLI: 'FFFBEFDD', LAIN: 'FFEEE7FA', ISOTANK: 'FFDFF3F7',
+  HT: 'FFE6F4EE', OHHT: 'FFE3ECFB', TS10: 'FFDFF3F7', TS20: 'FFFBEFDD', TS40: 'FFEEE7FA', BT: 'FFEDF0F3', PRS: 'FFE6F4EE',
+  KSO: 'FFE3ECFB', DF: 'FFFBEFDD', TOOLS: 'FFEEE7FA', OTHERS: 'FFDFF3F7',
 };
 
 /** 1 → A, 27 → AA */
@@ -220,7 +237,7 @@ export async function buatXlsxKeluar(o: OpsiExportKeluar): Promise<Blob> {
     const awal = r;
     for (const b of s.baris) {
       const ada = weeks.reduce((t, m) => t + v(s.key, b.label, m), 0) !== 0;
-      const a = wsWeek.getCell(r, 1); a.value = b.alias ?? ''; a.font = { name: FONT, size: 9, color: { argb: 'FF64748B' } };
+      const a = wsWeek.getCell(r, 1); a.value = b.alias ?? s.kode ?? ''; a.font = { name: FONT, size: 9, color: { argb: 'FF64748B' } };
       const lab = wsWeek.getCell(r, 2); lab.value = b.label;
       lab.font = { name: FONT, size: 10, color: { argb: ada ? 'FF111827' : 'FF94A3B8' } };
       const total = weeks.reduce((t, m) => t + v(s.key, b.label, m), 0);
@@ -290,7 +307,11 @@ export async function buatXlsxKeluar(o: OpsiExportKeluar): Promise<Blob> {
       const tr = s ? barisTotal.get(s.key) : undefined;
       let f: string | null = null, hasil = 0;
       if (n.jenis === 'grand') { f = `C${rGrand}`; hasil = weeks.reduce((t, m) => t + grand(m), 0); }
-      else if (s && tr) {
+      else if (n.jenis === 'terakhir') {
+        if (weeks.length) { f = `${huruf(weeks.length - 1)}${rGrand}`; hasil = grand(weeks[weeks.length - 1]); }
+      } else if (n.jenis === 'rataGrand') {
+        if (weeks.length) { f = `AVERAGE(${huruf(0)}${rGrand}:${hurufTerakhir}${rGrand})`; hasil = weeks.reduce((t, m) => t + grand(m), 0) / weeks.length; }
+      } else if (s && tr) {
         if (n.jenis === 'total') { f = `C${tr}`; hasil = weeks.reduce((t, m) => t + totalSeksi(s, m), 0); }
         else if (weeks.length) { f = `AVERAGE(${huruf(0)}${tr}:${hurufTerakhir}${tr})`; hasil = weeks.reduce((t, m) => t + totalSeksi(s, m), 0) / weeks.length; }
       } else if (n.seksi) hasil = 0; // seksi tak ada di template site ini → 0
@@ -368,7 +389,7 @@ export async function buatXlsxKeluar(o: OpsiExportKeluar): Promise<Blob> {
   for (let c = 2; c <= cRp; c++) wsRekap.getColumn(c).width = c === cTrans ? 14 : 19;
 
   // Catatan kecil di Report: arti dua kolom kunci.
-  wsRep.getCell(1, 17).note = 'Kunci SUMIFS sheet Week & Per Minggu: MH = Part Maintenance, OH = Overhold/Overhaul, OLI = Consumption OLI, LAIN = Lain-Lain, ISOTANK = ISO Tank.';
+  wsRep.getCell(1, 17).note = `Kunci SUMIFS sheet Week & Per Minggu: ${seksi.map((s) => `${KODE_SEKSI[s.key]} = ${s.judul}`).join(', ')}.`;
   wsRep.getCell(1, 18).note = 'Nama baris di sheet Week tempat transaksi ini dijumlahkan. Ubah nilainya di sini bila ingin memindahkan transaksi ke baris lain — angka di sheet Week ikut berubah.';
 
   const buffer = await wb.xlsx.writeBuffer();

@@ -20,8 +20,8 @@ import {
 import type { KelasAset, Klasifikasi } from './asetKlasifikasi';
 import { KartuKelas, BadgeKategori, Segmen } from './AsetKlasifikasiUi';
 import { NADA_KELAS, IKON_KELAS, ikonSub } from './asetKlasifikasiTema';
-import { TEMPLATE_SITE, kunciTemplate, cocokkanBarisTemplate, barisLainDariKode } from './weeklyTemplate';
-import type { SeksiTemplate, TemplateSite } from './weeklyTemplate';
+import { TEMPLATE_SITE, kunciTemplate, cocokkanBarisTemplate, barisLainDariKode, bagiBarisKeSeksi } from './weeklyTemplate';
+import type { SeksiTemplate, TemplateSite, SeksiKey } from './weeklyTemplate';
 import { buatXlsxKeluar, namaFileKeluar } from './weeklyExportKeluar';
 import type { BarisLaporan, SeksiExport, NbExport } from './weeklyExportKeluar';
 
@@ -47,7 +47,7 @@ import { MinStockView } from './MinStockView';
 import { OutstandingPrView } from './OutstandingPrView';
 
 // ── Tipe ──────────────────────────────────────────────────────────────────
-type Section = 'MAINT' | 'OH' | 'OLI' | 'LAIN' | 'ISOTANK';
+type Section = SeksiKey;
 
 interface WeeklyRow {
   id: string; site: string; direction: 'IN' | 'OUT' | 'ASET'; sourceTab: string; entitas?: string;
@@ -89,9 +89,28 @@ const SECTIONS: ({ key: Section; judul: string; totalLabel: string } & Nada)[] =
   // karena classifySection() cuma mendeteksinya lewat pola kode kontainer.
   { key: 'ISOTANK', judul: 'ISO Tank Per-Week', totalLabel: 'Total Harga ISO Tank', ...NADA.info },
 ];
+// Lima seksi di atas dipakai semua site. Seksi di bawah HANYA muncul lewat template Workshop Jabar
+// ("Week Workshop Jabar": dikelompokkan per jenis aset) — warna dipinjam dari palet yang ada.
+const SECTIONS_KLASIK = SECTIONS.slice();
+const SECTIONS_JABAR: typeof SECTIONS = [
+  { key: 'HT', judul: 'Head Truck', totalLabel: 'Total_Head Truck', ...NADA.in },
+  { key: 'OHHT', judul: 'OH Head Truck', totalLabel: 'Total_OH Head Truck', ...NADA.out },
+  { key: 'TS10', judul: 'Tube Skid 10 Feet', totalLabel: 'Total_Tube Skid 10 Feet', ...NADA.info },
+  { key: 'TS20', judul: 'Tube Skid 20 Feet', totalLabel: 'Total_Tube Skid 20 Feet', ...NADA.warn },
+  { key: 'TS40', judul: 'Tube Skid 40 Feet', totalLabel: 'Total_Tube Skid 40 Feet', ...NADA.aset },
+  { key: 'BT', judul: 'Bad Trailer 20-40 Feet', totalLabel: 'Total_Bad Trailer 20-40 Feet', ...NADA.neutral },
+  { key: 'PRS', judul: 'PRS', totalLabel: 'Total_PRS', ...NADA.in },
+  { key: 'KSO', judul: 'KSO', totalLabel: 'Total_KSO', ...NADA.out },
+  { key: 'DF', judul: 'Dual Fuel', totalLabel: 'Total_Dual Fuel', ...NADA.warn },
+  { key: 'TOOLS', judul: 'Tools Mekanik', totalLabel: 'Total_Tools Mekanik', ...NADA.aset },
+  { key: 'OTHERS', judul: 'Others', totalLabel: 'Total Others', ...NADA.info },
+];
+SECTIONS.push(...SECTIONS_JABAR);
 
 const LABEL_SEKSI: Record<Section, string> = {
   MAINT: 'Part Maintenance', OH: 'Overhold', OLI: 'Consumption OLI', LAIN: 'Lain-Lain', ISOTANK: 'ISO Tank',
+  HT: 'Head Truck', OHHT: 'OH Head Truck', TS10: 'Tube Skid 10 Feet', TS20: 'Tube Skid 20 Feet', TS40: 'Tube Skid 40 Feet',
+  BT: 'Bad Trailer 20-40 Feet', PRS: 'PRS', KSO: 'KSO', DF: 'Dual Fuel', TOOLS: 'Tools Mekanik', OTHERS: 'Others',
 };
 
 // Kategori generik yang wajar ada di semua site (bukan model mesin
@@ -115,6 +134,8 @@ const BARIS_UNIVERSAL: Record<Section, string[]> = {
   // (lihat urutkanBarisSeksi), tak ada kategori generik yang perlu selalu
   // ditampilkan meski kosong.
   ISOTANK: [],
+  // Seksi Workshop Jabar: barisnya sepenuhnya dari template, tak ada kategori generik.
+  HT: [], OHHT: [], TS10: [], TS20: [], TS40: [], BT: [], PRS: [], KSO: [], DF: [], TOOLS: [], OTHERS: [],
 };
 
 /**
@@ -195,6 +216,15 @@ function kunciBarisLaporan(r: WeeklyRow, tpl: TemplateSite | null): string {
   if (!t) return kunci;
   const baris = r.section === 'LAIN' ? barisLainDariKode(t, r.kodeBiaya ?? '') : null;
   return baris ?? cocokkanBarisTemplate(t, r.alokasi) ?? kunci;
+}
+/**
+ * Seksi + baris tempat sebuah transaksi dijumlahkan. Template biasa: seksi dari klasifikasi server (r.section);
+ * template Workshop Jabar (bagiPerAlokasi): dari kode biaya + nama Alokasi yang dicocokkan ke baris template.
+ * Satu-satunya pintu masuk — tabel di layar, grafik, dan export Excel semuanya lewat sini supaya angkanya sama.
+ */
+function tentukanBaris(r: WeeklyRow, tpl: TemplateSite | null): { seksi: Section; baris: string } {
+  if (tpl?.bagiPerAlokasi) return bagiBarisKeSeksi(tpl, r);
+  return { seksi: r.section, baris: kunciBarisLaporan(r, tpl) };
 }
 // ── Entitas pemilik transaksi: RDA / RCE / RET ────────────────────────────
 // Satu site bisa memakai beberapa entitas (PT) sekaligus, masing-masing punya
@@ -478,11 +508,19 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', saatTerlihat); };
   }, [muatData, menyinkron]);
 
-  // ── Template Excel per site (Week MS Wunut / Blora / KHT / SETU / LNG Sangkulirang / RET) ──
-  // Dipakai untuk data Mother Station (RDA) dan RET. Workshop (RCE) & site lain tetap memakai baris dinamis.
+  // ── Template Excel per site (Week MS Wunut / Blora / KHT / SETU / LNG Sangkulirang / RET / Workshop Jabar) ──
+  // Mother Station (RDA) & RET memakai template site masing-masing. SEMUA Workshop (entitas RCE, site mana pun)
+  // memakai template \"Week Workshop Jabar\" — kelompok & daftar alokasinya sama di semua workshop.
   const kunciTplSite = kunciTemplate(site, labelSite);
-  const kunciTpl = kunciTplSite === 'ret' ? (entitas === 'RET' ? 'ret' : null) : (entitas === 'RDA' || (entitas === 'UMUM' && entitasTersedia.length === 1) ? kunciTplSite : null);
+  const kunciTpl = entitas === 'RCE' ? 'jabar'
+    : kunciTplSite === 'ret' ? (entitas === 'RET' ? 'ret' : null)
+    : kunciTplSite === 'jabar' ? (entitas === 'RDA' || entitas === 'RET' ? null : 'jabar')
+    : (entitas === 'RDA' || (entitas === 'UMUM' && entitasTersedia.length === 1) ? kunciTplSite : null);
   const tpl = kunciTpl ? TEMPLATE_SITE[kunciTpl] : null;
+  // Nama sheet/judul: milik Workshop Jabar bila site-nya Jabar; workshop site lain memakai nama site-nya sendiri.
+  const tplTanpaNamaSite = !!tpl?.bagiPerAlokasi && kunciTplSite !== 'jabar';
+  const namaSiteTpl = tplTanpaNamaSite ? `Workshop ${labelPenuh(labelSite)}`.replace(/^Workshop\s+(Workshop|WS)\s+/i, 'Workshop ') : tpl?.namaSite ?? labelPenuh(labelSite);
+  const judulSheetTpl = tplTanpaNamaSite ? `Inventory ${namaSiteTpl}` : tpl?.judulSheet ?? `Inventory ${labelPenuh(labelSite)}`;
   const seksiTpl = (k: Section): SeksiTemplate | undefined => tpl?.seksi.find((x) => x.key === k);
 
   // ── Pivot biaya (mode BARANG KELUAR) ────────────────────────────────────
@@ -492,21 +530,21 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     const minggus = [...mingguSet].sort((a, b) => a - b);
 
     const kelompokKegiatan = rows.length > 0 && SITE_KELOMPOK_KEGIATAN.has(rows[0].site);
-    const p: Record<Section, Record<string, Record<number, number>>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {}, ISOTANK: {} };
+    const p = Object.fromEntries(SECTIONS.map((s) => [s.key, {}])) as Record<Section, Record<string, Record<number, number>>>;
     if (tpl) {
       // Baris tetap sesuai template Excel — tetap tampil walau belum terpakai (nilai "-").
       for (const t of tpl.seksi) for (const b of t.baris) p[t.key][b.label] = {};
     } else if (!kelompokKegiatan && entitas !== 'RCE') {
-      for (const s of SECTIONS) for (const a of BARIS_UNIVERSAL[s.key]) p[s.key][a] = {};
+      for (const s of SECTIONS_KLASIK) for (const a of BARIS_UNIVERSAL[s.key]) p[s.key][a] = {};
     }
     for (const r of rows) {
       // Alokasi yang tak ada di template tetap dihitung (baris tambahan di bawah), supaya total tidak hilang.
-      const kunci = kunciBarisLaporan(r, tpl);
-      const bucket = (p[r.section][kunci] ??= {});
+      const { seksi, baris: kunci } = tentukanBaris(r, tpl);
+      const bucket = (p[seksi][kunci] ??= {});
       bucket[r.minggu] = (bucket[r.minggu] ?? 0) + r.totalHarga;
     }
 
-    const ts: Record<Section, Record<number, number>> = { MAINT: {}, OH: {}, OLI: {}, LAIN: {}, ISOTANK: {} };
+    const ts = Object.fromEntries(SECTIONS.map((s) => [s.key, {}])) as Record<Section, Record<number, number>>;
     const gt: Record<number, number> = {};
     for (const s of SECTIONS) {
       for (const baris of Object.values(p[s.key])) {
@@ -538,8 +576,8 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       return [...urut, ...ekstra];
     }
     // ISO Tank hanya untuk LNG (Sangkulirang); site lain tidak menampilkannya.
-    if (SITE_HANYA_LAIN_ISOTANK.has(site)) return SECTIONS.filter((s) => s.key === 'LAIN' || s.key === 'ISOTANK');
-    const tanpaIso = SECTIONS.filter((s) => s.key !== 'ISOTANK');
+    if (SITE_HANYA_LAIN_ISOTANK.has(site)) return SECTIONS_KLASIK.filter((s) => s.key === 'LAIN' || s.key === 'ISOTANK');
+    const tanpaIso = SECTIONS_KLASIK.filter((s) => s.key !== 'ISOTANK');
     // Workshop (RCE): tampilkan hanya seksi yang punya baris alokasi nyata.
     if (entitas === 'RCE') return tanpaIso.filter((s) => Object.keys(pivot[s.key]).length > 0);
     return tanpaIso;
@@ -549,6 +587,8 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
   const judulSeksi = (s: { key: Section; judul: string }) => seksiTpl(s.key)?.judul ?? s.judul;
   const totalLabelSeksi = (s: { key: Section; totalLabel: string }) => seksiTpl(s.key)?.totalLabel ?? s.totalLabel;
   const kolomSeksi = (k: Section) => seksiTpl(k)?.labelKolom ?? LABEL_SEKSI[k];
+  /** Kode biaya sheet (MH/OH/DF/O) seksi ini — jadi kolom A di export, seperti kolom A sheet \"Week Workshop Jabar\". */
+  const kodeSeksi = (k: Section) => { const kd = seksiTpl(k)?.kode; return kd?.[kd.length - 1]; };
   const aliasBaris = (k: Section, label: string) => seksiTpl(k)?.baris.find((b) => b.label === label)?.alias;
   const diLuarTemplate = (k: Section, label: string) => { const t = seksiTpl(k); return !!t && !t.baris.some((b) => b.label === label); };
   /** Baris template dulu (urutan Excel), baru alokasi tambahan yang tak ada di template. */
@@ -574,6 +614,15 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         { teks: `Grand Total penggunaan Part ${nama} sebesar :`, jenis: 'grand', nilai: totalKeseluruhan, warna: NADA.in.teks },
       ];
     }
+    if (kunciTpl === 'jabar') {
+      // Sama dengan blok NB di sheet \"Week Workshop Jabar\": minggu terakhir, total keseluruhan, rata-rata per minggu.
+      const mTerakhir = mingguList[mingguList.length - 1];
+      return [
+        { teks: `Total penggunaan Part Maintenance WORKSHOP${mTerakhir ? ` Week ${mTerakhir}` : ''} sebesar :`, jenis: 'terakhir', nilai: mTerakhir ? (grandTotal[mTerakhir] ?? 0) : 0, warna: NADA.in.teks },
+        { teks: 'Total penggunaan Part Maintenance WORKSHOP sebesar :', jenis: 'grand', nilai: totalKeseluruhan, warna: NADA.in.teks },
+        { teks: 'Dengan Rata-rata penggunaan Part Maintenance Sebesar :', jenis: 'rataGrand', nilai: mingguList.length ? totalKeseluruhan / mingguList.length : 0, warna: NADA.in.teks },
+      ];
+    }
     if (kunciTpl === 'ret') {
       return [
         { teks: `Total penggunaan Part Maintenance ${nama} sebesar :`, jenis: 'total', seksi: 'MAINT', nilai: tot('MAINT'), warna: NADA.in.teks },
@@ -591,7 +640,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
       { teks: `Dan Total Biaya Lain-Lain ${nama} sebesar :`, jenis: 'total', seksi: 'LAIN', nilai: tot('LAIN'), warna: NADA.aset.teks },
       { teks: `Jadi Grand Total Penggunaan Part ${nama} sebesar :`, jenis: 'grand', nilai: totalKeseluruhan, warna: NADA.in.teks },
     ];
-  }, [tpl, kunciTpl, labelSite, totalPerSeksi, totalSeksi, mingguList, totalKeseluruhan]);
+  }, [tpl, kunciTpl, labelSite, totalPerSeksi, totalSeksi, mingguList, totalKeseluruhan, grandTotal]);
 
   // Data grafik mode KELUAR: batang bertumpuk per minggu + pie komposisi seksi.
   // Satu garis: total biaya semua kategori per minggu (rincian per kategori ada di kartu & donat).
@@ -959,6 +1008,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
     try {
       const seksiExport: SeksiExport[] = sectionsAktif.map((s) => ({
         key: s.key, judul: judulSeksi(s), labelKolom: kolomSeksi(s.key), totalLabel: totalLabelSeksi(s),
+        kode: kodeSeksi(s.key),
         baris: urutBaris(s.key, Object.keys(pivot[s.key])).map((label) => ({ label, alias: aliasBaris(s.key, label) })),
       }));
       const dasar = mingguExport ? rows.filter((r) => r.minggu === mingguExport) : rows;
@@ -966,10 +1016,10 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         minggu: r.minggu, tanggal: r.tanggal, bulan: r.bulan, tahun: r.tahun, kode: r.kode, namaBarang: r.namaBarang,
         jumlah: r.jumlah, satuan: r.satuan, alokasi: r.alokasi, detailAlokasi: r.detailAlokasi, pic: r.pic, harga: r.harga,
         totalHarga: r.totalHarga, noMr: r.noMr, keterangan: r.keterangan, kodeBiaya: r.kodeBiaya ?? '',
-        section: r.section, baris: kunciBarisLaporan(r, tpl),
+        ...(({ seksi, baris: b }) => ({ section: seksi, baris: b }))(tentukanBaris(r, tpl)),
       }));
       const opsi = {
-        namaSite: labelPenuh(labelSite), judulSheet: tpl?.judulSheet ?? `Inventory ${labelPenuh(labelSite)}`,
+        namaSite: namaSiteTpl, judulSheet: judulSheetTpl,
         tahun, bulan, minggu: mingguExport, seksi: seksiExport, grandLabel: tpl?.grandLabel ?? 'Grand Total Price',
         rows: baris, mingguList: mingguExport ? [mingguExport] : mingguList, volumes,
         nb: barisNb ? barisNb.map(({ teks, jenis, seksi }) => ({ teks, jenis, seksi })) : null,
@@ -1266,7 +1316,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
                   <tr>
                     <td colSpan={mingguList.length + 2}
                       style={{ padding: '.8rem .75rem .1rem', fontWeight: 800, fontSize: '.95rem', color: 'var(--txt-primary)' }}>
-                      {tpl.judulSheet} {bulan ? `${NAMA_BULAN[bulan - 1]} ` : ''}{tahun}
+                      {judulSheetTpl} {bulan ? `${NAMA_BULAN[bulan - 1]} ` : ''}{tahun}
                     </td>
                   </tr>
                 )}
