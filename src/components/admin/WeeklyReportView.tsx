@@ -1125,7 +1125,7 @@ export function WeeklyReportView({ auth, mode, tanpaHeader, siteFokus, tahunFoku
         <WorkTargetView auth={auth} />
       ) : picaAktif ? (
         <PicaView site={site} labelSite={labelPenuh(labelSite)} sites={sites}
-          onSiteChange={(s) => setSite(s)} siteTerkunci={siteTerkunci} />
+          onSiteChange={(s) => setSite(s)} siteTerkunci={siteTerkunci} superAdmin={isSuperAdmin} />
       ) : (
       <>
       {/* Filter + aksi */}

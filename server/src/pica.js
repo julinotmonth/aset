@@ -62,7 +62,7 @@ const BULAN_ABBR_ID = {
   jan: 1, feb: 2, mar: 3, apr: 4, mei: 5, jun: 6,
   jul: 7, agu: 8, ags: 8, sep: 9, okt: 10, nov: 11, des: 12,
 };
-function parseTanggalPica(raw) {
+export function parseTanggalPica(raw) {
   const s = String(raw || '').trim();
   if (!s) return null;
   const iso = parseTanggal(s);
@@ -273,7 +273,7 @@ export const PicaItems = {
     // Isi lama (sebelum ditimpa) — dasar mendeteksi perubahan nyata untuk notifikasi.
     const { rows: lamaRows } = await query(
       `SELECT row_hash, no, tanggal, problem, identifikasi, deskripsi, target_date, pic, status, latest_week, latest_note
-         FROM pica_items WHERE site = $1`, [site]);
+         FROM pica_items WHERE site = $1 AND origin = 'sheet'`, [site]);
     const lama = new Map(lamaRows.map((x) => [x.row_hash, x]));
     const barisBaru = [], ubahDiTempat = [];
     for (const r of records) {
@@ -306,7 +306,8 @@ export const PicaItems = {
     let removed = 0;
     if (hashesInBatch.length > 0) {
       const res = await query(
-        `DELETE FROM pica_items WHERE site = $1 AND NOT (row_hash = ANY($2::text[]))`,
+        // Hanya baris asal sheet: isu yang diinput manual lewat aplikasi tidak ada di sheet dan tidak boleh ikut terhapus.
+        `DELETE FROM pica_items WHERE site = $1 AND origin = 'sheet' AND NOT (row_hash = ANY($2::text[]))`,
         [site, hashesInBatch]
       );
       removed = res.rowCount;
@@ -334,14 +335,16 @@ export const PicaItems = {
     return { inserted, updated, removed, total: records.length };
   },
 
+  /** site = null → semua site (dipakai tampilan "Semua Site" Super Admin). */
   async list(site) {
     const { rows } = await query(
-      `SELECT * FROM pica_items WHERE site = $1 ORDER BY tanggal NULLS LAST, no`, [site]);
+      `SELECT * FROM pica_items WHERE ($1::text IS NULL OR site = $1) ORDER BY site, tanggal NULLS LAST, no`, [site]);
     return rows.map((r) => ({
       id: r.id, site: r.site, no: r.no, tanggal: r.tanggal, problem: r.problem,
       identifikasi: r.identifikasi, deskripsi: r.deskripsi, targetDate: r.target_date,
       pic: r.pic, status: r.status, updates: r.updates, latestWeek: r.latest_week,
       latestNote: r.latest_note, importedAt: r.imported_at, importedBy: r.imported_by,
+      origin: r.origin, kategori: r.kategori, updatedAt: r.updated_at, updatedBy: r.updated_by,
     }));
   },
 
@@ -368,7 +371,7 @@ export const PicaItems = {
 };
 
 // ── Otorisasi: user hanya boleh menyentuh site-nya sendiri ────────────────
-function siteGuard(req, site) {
+export function siteGuard(req, site) {
   const mine = req.auth.assignedSite;
   if (req.auth.role === 'Super Admin' || mine === 'global' || !mine) return;
   if (site && site !== mine) {
@@ -384,6 +387,7 @@ export function picaRouter() {
   r.get('/pica', requireAuth, wrap(async (req, res) => {
     const site = req.query.site || (req.auth.assignedSite !== 'global' ? req.auth.assignedSite : null);
     if (!site) return res.status(400).json({ error: 'Parameter site wajib diisi.' });
+    siteGuard(req, site);   // akun yang dibatasi ke satu site tidak boleh membaca PICA site lain
     res.json(await PicaItems.list(site));
   }));
 
@@ -423,8 +427,15 @@ export function picaRouter() {
   }));
 
   r.delete('/pica/:id', requireAuth, wrap(async (req, res) => {
-    const { rowCount } = await query('DELETE FROM pica_items WHERE id = $1', [req.params.id]);
-    if (!rowCount) return res.status(404).json({ error: 'Baris tidak ditemukan.' });
+    const { rows } = await query('SELECT site, no, problem, pic, status, origin FROM pica_items WHERE id = $1', [req.params.id]);
+    const it = rows[0];
+    if (!it) return res.status(404).json({ error: 'Baris tidak ditemukan.' });
+    siteGuard(req, it.site);
+    await query('DELETE FROM pica_items WHERE id = $1', [req.params.id]);
+    // Isu manual dicatat di notifikasi; baris dari sheet dihapus pun akan muncul lagi di sync berikutnya.
+    if (it.origin === 'manual') {
+      await catatPerubahan({ site: it.site, area: 'PICA', sumber: req.auth.email, hapus: [{ pic: it.pic, nama: namaIsu(it.no, it.problem), ket: it.status }] });
+    }
     res.status(204).end();
   }));
 

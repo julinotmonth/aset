@@ -16,21 +16,21 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import type { CSSProperties } from 'react';
 import {
   Link2, RefreshCw, Loader2, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight, Search, ListChecks, Clock,
+  Plus, FileDown, FileUp, Download, Pencil, Trash2, CalendarPlus, Lock, ArrowUpRight, Tags, ArrowUpDown, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import type { SiteMeta } from '../../data/siteStore';
 import { labelPenuh } from './siteLabel';
 import { NADA, WR_CSS } from './wrTema';
 import type { Nada } from './wrTema';
+import { PicaFormModal, PicaMingguModal } from './PicaFormModal';
+import { PicaImportModal } from './PicaImportModal';
+import { KelolaKategoriPica } from './KelolaKategoriPica';
+import type { KategoriPica } from './KelolaKategoriPica';
+import { buatExcelPica, simpanBerkas, labelMinggu, nomorMingguDari, nomorDariLabel } from './picaTemplate';
+import type { PicaItem } from './picaTemplate';
 
 interface PicaUpdate { week: string; catatan: string }
-
-interface PicaItem {
-  id: string; site: string; no: string; tanggal: string | null;
-  problem: string; identifikasi: string; deskripsi: string;
-  targetDate: string | null; pic: string; status: string;
-  updates: PicaUpdate[]; latestWeek: string; latestNote: string;
-}
 
 interface PicaSource {
   site: string; sheetId: string; gid: string;
@@ -40,6 +40,8 @@ interface PicaSource {
 interface Props {
   site: string; labelSite: string; sites: SiteMeta[];
   onSiteChange: (site: string) => void; siteTerkunci: boolean;
+  /** Hanya Super Admin yang melihat tombol Kelola Kategori (server juga menolak akun lain). */
+  superAdmin?: boolean;
 }
 
 // Warna kontrol/tombol datang dari kelas .wr-ctl / .wr-btn (WR_CSS) — di sini
@@ -128,7 +130,24 @@ function KartuRingkas({ label, nilai, nada, aktif, onClick }: {
 }
 
 
-export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }: Props) {
+const SEMUA_SITE = '__semua__';
+
+export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci, superAdmin = false }: Props) {
+  // Mode "Semua Site" (Super Admin / akun tanpa batas site): semua isu dari semua site sekaligus, tanpa buka satu per satu.
+  const [semuaSite, setSemuaSite] = useState(false);
+  const [filterSite, setFilterSite] = useState<string | null>(null);
+  const modeSemua = semuaSite && !siteTerkunci;
+  // Kategori: daftar resmi (diatur Super Admin), penyaring chip, dan pengurutan kolom Kategori.
+  const [kategoriList, setKategoriList] = useState<KategoriPica[]>([]);
+  const [filterKategori, setFilterKategori] = useState<string | null>(null);   // null = semua, '' = tanpa kategori
+  const [urutKategori, setUrutKategori] = useState<'asc' | 'desc' | null>(null);
+  const [kelolaKategori, setKelolaKategori] = useState(false);
+  const namaKategori = useMemo(() => kategoriList.map((k) => k.nama), [kategoriList]);
+  const muatKategori = useCallback(async () => {
+    try { setKategoriList(await api.get<KategoriPica[]>('/pica/kategori')); } catch { /* daftar kosong: dropdown & chip menyesuaikan */ }
+  }, []);
+  useEffect(() => { void muatKategori(); }, [muatKategori]);
+  const namaSite = useCallback((key: string) => labelPenuh(sites.find((x) => x.key === key)?.label ?? key), [sites]);
   const [items, setItems] = useState<PicaItem[]>([]);
   const [source, setSource] = useState<PicaSource | null>(null);
   const [memuat, setMemuat] = useState(true);
@@ -139,25 +158,36 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
   const [filterGolongan, setFilterGolongan] = useState<'SEMUA' | 'jalan' | 'overdue' | 'selesai'>('SEMUA');
   const [cari, setCari] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Input manual: form isu (baru/ubah), form catatan mingguan, import Excel, konfirmasi hapus.
+  const [form, setForm] = useState<{ item: PicaItem | null } | null>(null);
+  const [itemMinggu, setItemMinggu] = useState<PicaItem | null>(null);
+  const [importTerbuka, setImportTerbuka] = useState(false);
+  const [konfirmasiHapus, setKonfirmasiHapus] = useState<string | null>(null);
+  const [mengunduh, setMengunduh] = useState<'' | 'template' | 'export'>('');
 
   const muat = useCallback(async () => {
     setMemuat(true);
     try {
-      const [data, src] = await Promise.all([
-        api.get<PicaItem[]>(`/pica?site=${encodeURIComponent(site)}`),
-        api.get<PicaSource | null>(`/pica/source?site=${encodeURIComponent(site)}`),
-      ]);
-      setItems(data);
-      setSource(src);
+      if (modeSemua) {
+        setItems(await api.get<PicaItem[]>('/pica/semua'));
+        setSource(null);
+      } else {
+        const [data, src] = await Promise.all([
+          api.get<PicaItem[]>(`/pica?site=${encodeURIComponent(site)}`),
+          api.get<PicaSource | null>(`/pica/source?site=${encodeURIComponent(site)}`),
+        ]);
+        setItems(data);
+        setSource(src);
+      }
     } catch (err) {
       setPesan({ tipe: 'error', teks: err instanceof Error ? err.message : 'Gagal memuat data PICA.' });
     } finally {
       setMemuat(false);
     }
-  }, [site]);
+  }, [site, modeSemua]);
 
   useEffect(() => { void muat(); }, [muat]);
-  useEffect(() => { setFilterGolongan('SEMUA'); setCari(''); setExpanded(new Set()); }, [site]);
+  useEffect(() => { setFilterGolongan('SEMUA'); setCari(''); setExpanded(new Set()); setKonfirmasiHapus(null); setFilterSite(null); setFilterKategori(null); }, [site, modeSemua]);
 
   const simpanSumber = async () => {
     try {
@@ -184,6 +214,58 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
     }
   };
 
+  const selesaiSimpan = async (pesanOk: string, bukaId?: string) => {
+    setForm(null); setItemMinggu(null); setImportTerbuka(false);
+    setPesan({ tipe: 'ok', teks: pesanOk });
+    await muat();
+    if (bukaId) setExpanded((prev) => new Set(prev).add(bukaId));
+  };
+
+  const hapusIsu = async (it: PicaItem) => {
+    try {
+      await api.delete(`/pica/${it.id}`);
+      setKonfirmasiHapus(null);
+      setPesan({ tipe: 'ok', teks: `Isu No ${it.no} dihapus.` });
+      await muat();
+    } catch (err) {
+      setPesan({ tipe: 'error', teks: err instanceof Error ? err.message : 'Gagal menghapus isu.' });
+    }
+  };
+
+  const namaBerkas = (jenis: string) => `PICA_${labelSite.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')}_${jenis}.xlsx`;
+
+  const unduhTemplate = async () => {
+    setMengunduh('template');
+    try {
+      const sekarang = nomorMingguDari();
+      const minggu = [sekarang - 3, sekarang - 2, sekarang - 1, sekarang].filter((n) => n >= 1).map(labelMinggu);
+      simpanBerkas(await buatExcelPica({ namaSite: labelSite, minggu, kategori: namaKategori }), namaBerkas('Template'));
+      setPesan({ tipe: 'ok', teks: 'Template diunduh. Isi di Excel (petunjuknya ada di sheet “Petunjuk”), lalu unggah lewat tombol Import.' });
+    } catch (err) {
+      setPesan({ tipe: 'error', teks: err instanceof Error ? err.message : 'Gagal membuat template.' });
+    } finally { setMengunduh(''); }
+  };
+
+  const unduhExport = async () => {
+    setMengunduh('export');
+    try {
+      const adaMinggu = new Set<string>();
+      for (const it of items) for (const u of it.updates) adaMinggu.add(u.week);
+      if (!adaMinggu.size) adaMinggu.add(labelMinggu(nomorMingguDari()));
+      const minggu = [...adaMinggu].sort((a, b) => nomorDariLabel(a) - nomorDariLabel(b));
+      const isu = items.map((it) => ({
+        no: it.no, tanggal: it.tanggal?.slice(0, 10) ?? '', problem: it.problem, identifikasi: it.identifikasi, deskripsi: it.deskripsi,
+        targetDate: it.targetDate?.slice(0, 10) ?? '', pic: it.pic, status: it.status, kategori: it.kategori ?? '',
+        updates: it.updates, origin: it.origin ?? 'sheet',
+      }));
+      const tgl = new Date().toISOString().slice(0, 10);
+      simpanBerkas(await buatExcelPica({ namaSite: labelSite, minggu, isu, kategori: namaKategori }), namaBerkas(tgl));
+      setPesan({ tipe: 'ok', teks: `${items.length} isu diekspor. Isu bersumber Google Sheet tidak akan berubah bila file ini diimpor kembali.` });
+    } catch (err) {
+      setPesan({ tipe: 'error', teks: err instanceof Error ? err.message : 'Gagal mengekspor.' });
+    } finally { setMengunduh(''); }
+  };
+
   const toggle = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -192,20 +274,63 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
     });
   };
 
+  // Isu yang jadi dasar kartu & tabel: seluruh isu, atau hanya satu site bila kartu site dipilih (mode Semua Site).
+  const dasar = useMemo(() => (modeSemua && filterSite ? items.filter((it) => it.site === filterSite) : items), [items, modeSemua, filterSite]);
+
+  const samaKategori = (it: PicaItem, f: string) => (it.kategori ?? '').toLowerCase() === f.toLowerCase();
+  const berKategori = useMemo(
+    () => (filterKategori === null ? dasar : dasar.filter((it) => samaKategori(it, filterKategori))), [dasar, filterKategori]);
+
   const ringkasan = useMemo(() => {
-    const r = { total: items.length, jalan: 0, overdue: 0, selesai: 0 };
-    for (const it of items) r[golonganStatus(it.status)]++;
+    const r = { total: berKategori.length, jalan: 0, overdue: 0, selesai: 0 };
+    for (const it of berKategori) r[golonganStatus(it.status)]++;
     return r;
-  }, [items]);
+  }, [berKategori]);
+
+  // Ringkasan per site: yang paling banyak overdue di paling atas — supaya masalah terlihat tanpa membuka site satu per satu.
+  const perSite = useMemo(() => {
+    const m = new Map<string, { key: string; label: string; total: number; jalan: number; overdue: number; selesai: number }>();
+    for (const it of items) {
+      const e = m.get(it.site) ?? { key: it.site, label: namaSite(it.site), total: 0, jalan: 0, overdue: 0, selesai: 0 };
+      e.total++; e[golonganStatus(it.status)]++;
+      m.set(it.site, e);
+    }
+    return [...m.values()].sort((a, b) => b.overdue - a.overdue || b.jalan - a.jalan || a.label.localeCompare(b.label));
+  }, [items, namaSite]);
+  const siteTanpaIsu = useMemo(() => sites.filter((x) => !items.some((it) => it.site === x.key)).map((x) => labelPenuh(x.label)), [sites, items]);
+
+  const lolosStatusCari = useCallback((it: PicaItem) => {
+    if (filterGolongan !== 'SEMUA' && golonganStatus(it.status) !== filterGolongan) return false;
+    const q = cari.trim().toLowerCase();
+    if (!q) return true;
+    return `${modeSemua ? namaSite(it.site) : ''} ${it.no} ${it.problem} ${it.identifikasi} ${it.deskripsi} ${it.pic} ${it.kategori ?? ''}`.toLowerCase().includes(q);
+  }, [filterGolongan, cari, modeSemua, namaSite]);
+
+  // Chip kategori: jumlah mengikuti penyaring lain (site, status, pencarian) tapi bukan penyaring kategorinya sendiri.
+  const chipKategori = useMemo(() => {
+    const hitung = new Map<string, number>();
+    for (const it of dasar) if (lolosStatusCari(it)) { const k = it.kategori ?? ''; hitung.set(k.toLowerCase(), (hitung.get(k.toLowerCase()) ?? 0) + 1); }
+    const resmi = namaKategori.map((n) => ({ nama: n, jumlah: hitung.get(n.toLowerCase()) ?? 0 }));
+    // Nama di data yang tak ada di daftar resmi (sisa data lama) tetap bisa disaring.
+    const lain = [...hitung.keys()].filter((k) => k && !namaKategori.some((n) => n.toLowerCase() === k))
+      .map((k) => ({ nama: dasar.find((it) => (it.kategori ?? '').toLowerCase() === k)?.kategori ?? k, jumlah: hitung.get(k) ?? 0 }));
+    return { daftar: [...resmi, ...lain], tanpa: hitung.get('') ?? 0, semua: [...hitung.values()].reduce((a, b) => a + b, 0) };
+  }, [dasar, lolosStatusCari, namaKategori]);
 
   const ditampilkan = useMemo(() => {
-    const q = cari.trim().toLowerCase();
-    return items.filter((it) => {
-      if (filterGolongan !== 'SEMUA' && golonganStatus(it.status) !== filterGolongan) return false;
-      if (!q) return true;
-      return `${it.no} ${it.problem} ${it.identifikasi} ${it.deskripsi} ${it.pic}`.toLowerCase().includes(q);
+    const hasil = berKategori.filter(lolosStatusCari);
+    if (!urutKategori) return hasil;
+    // Urut menurut urutan kategori di Kelola Kategori; "tanpa kategori" selalu di akhir. Sort stabil: urutan awal (site, tanggal) terjaga.
+    const posisi = (it: PicaItem) => { const i = namaKategori.findIndex((n) => n.toLowerCase() === (it.kategori ?? '').toLowerCase()); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+    const arah = urutKategori === 'asc' ? 1 : -1;
+    return hasil.slice().sort((a, b) => {
+      const pa = posisi(a), pb = posisi(b);
+      if (pa === pb) return 0;
+      if (pa === Number.MAX_SAFE_INTEGER) return 1;
+      if (pb === Number.MAX_SAFE_INTEGER) return -1;
+      return (pa - pb) * arah;
     });
-  }, [items, filterGolongan, cari]);
+  }, [berKategori, lolosStatusCari, urutKategori, namaKategori]);
 
   const kosong = !memuat && !items.length;
 
@@ -214,8 +339,13 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
       <style>{WR_CSS}</style>
       {/* Filter + aksi */}
       <div className="glass-panel" style={{ borderRadius: 16, padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center' }}>
-        <select value={site} onChange={(e) => onSiteChange(e.target.value)} disabled={siteTerkunci} aria-label="Pilih site"
+        <select value={modeSemua ? SEMUA_SITE : site} disabled={siteTerkunci} aria-label="Pilih site"
+          onChange={(e) => {
+            if (e.target.value === SEMUA_SITE) { setSemuaSite(true); return; }
+            setSemuaSite(false); onSiteChange(e.target.value);
+          }}
           className="wr-ctl" style={kontrol}>
+          {!siteTerkunci && <option value={SEMUA_SITE}>Semua Site</option>}
           {sites.map((s) => <option key={s.key} value={s.key}>{labelPenuh(s.label)}</option>)}
         </select>
 
@@ -225,8 +355,38 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
             className="wr-ctl" style={{ ...kontrol, paddingLeft: '2rem', width: 220, maxWidth: '100%' }} />
         </div>
 
+        {modeSemua && (
+          <span style={{ fontSize: '.76rem', color: 'var(--wr-txt-muted)' }}>
+            Ringkasan seluruh site — pilih satu site untuk menambah, import, atau sinkron.
+          </span>
+        )}
+        {!modeSemua && <>
+        <button type="button" className="wr-btn wr-btn--primary" onClick={() => setForm({ item: null })} style={{ ...tombol, padding: '.5rem .95rem' }}>
+          <Plus size={15} /> Tambah Isu
+        </button>
+        <button type="button" className="wr-btn" onClick={unduhTemplate} disabled={!!mengunduh} style={tombol}
+          title="Unduh template Excel kosong untuk diisi lalu diimpor">
+          {mengunduh === 'template' ? <Loader2 size={15} /> : <FileDown size={15} />} Template
+        </button>
+        <button type="button" className="wr-btn" onClick={() => setImportTerbuka(true)} style={tombol}
+          title="Unggah template Excel yang sudah diisi">
+          <FileUp size={15} /> Import
+        </button>
+        <button type="button" className="wr-btn" onClick={unduhExport} disabled={!!mengunduh || !items.length} style={{ ...tombol, opacity: items.length ? 1 : .5 }}
+          title="Unduh semua isu site ini ke Excel">
+          {mengunduh === 'export' ? <Loader2 size={15} /> : <Download size={15} />} Export
+        </button>
+        </>}
+
         <div style={{ flex: 1 }} />
 
+        {superAdmin && (
+          <button type="button" className="wr-btn" onClick={() => setKelolaKategori(true)} style={tombol} title="Tambah, ubah, urutkan, atau hapus kategori PICA (khusus Super Admin)">
+            <Tags size={15} /> Kelola Kategori
+          </button>
+        )}
+
+        {!modeSemua && <>
         <button type="button" className="wr-btn wr-btn--info" onClick={() => setPanelSumberTerbuka((v) => !v)}
           style={tombol}>
           <Link2 size={15} /> Sumber Sheet
@@ -237,10 +397,11 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
           style={{ ...tombol, padding: '.5rem .95rem', cursor: source ? 'pointer' : 'not-allowed', opacity: source ? 1 : .5 }}>
           {menyinkron ? <Loader2 size={15} /> : <RefreshCw size={15} />} Sync Sekarang
         </button>
+        </>}
       </div>
 
       {/* Panel konfigurasi sumber */}
-      {panelSumberTerbuka && (
+      {panelSumberTerbuka && !modeSemua && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '1.1rem 1.25rem', marginBottom: '1rem', display: 'grid', gap: '.75rem' }}>
           <label style={{ fontSize: '.78rem', color: 'var(--wr-txt-muted)' }}>
             Link Google Spreadsheet tab PICA untuk {labelSite}
@@ -252,7 +413,7 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
             Tempel link yang langsung mengarah ke tab PICA-nya (klik tab-nya dulu di Google Sheets, lalu copy URL dari
             address bar — akan ada <code>?gid=...</code> di belakang). Beda dengan Laporan Mingguan Barang Masuk/Keluar,
             di sini <strong>tidak perlu ketik nama tab manual</strong> — gid dibaca otomatis dari link.
-            Sheet harus dibagikan sebagai <strong>Anyone with the link — Viewer</strong>. Disinkronkan otomatis tiap 5 menit.
+            Sheet harus dibagikan sebagai <strong>Anyone with the link — Viewer</strong>. Disinkronkan otomatis tiap 5 menit. Isu yang diinput manual lewat aplikasi tidak ikut terhapus oleh sinkronisasi.
             {source?.lastSyncAt && <> Sync terakhir: {new Date(source.lastSyncAt).toLocaleString('id-ID')} ({source.lastStatus}).</>}
           </div>
           <div>
@@ -280,12 +441,75 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
 
       {kosong && (
         <div className="glass-panel" style={{ borderRadius: 16, padding: '2.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)' }}>
-          Belum ada data PICA untuk {labelSite}. Atur sumber spreadsheet lalu klik "Sync Sekarang".
+          {modeSemua ? (
+            <>
+              <div>Belum ada data PICA di site mana pun.</div>
+              <div style={{ fontSize: '.8rem', marginTop: '.4rem' }}>Pilih satu site di atas untuk mulai mencatat isu atau menyinkronkan dari Google Sheet.</div>
+            </>
+          ) : (
+            <>
+              <div>Belum ada data PICA untuk {labelSite}.</div>
+              <div style={{ fontSize: '.8rem', marginTop: '.4rem' }}>
+                Catat isu pertama lewat “Tambah Isu”, isi banyak sekaligus lewat “Template” lalu “Import”,
+                atau atur sumber spreadsheet dan klik “Sync Sekarang”.
+              </div>
+            </>
+          )}
         </div>
       )}
 
+      <PicaFormModal isOpen={!!form} item={form?.item ?? null} site={form?.item?.site ?? site} labelSite={form?.item ? namaSite(form.item.site) : labelSite} kategori={namaKategori}
+        onClose={() => setForm(null)} onSaved={(it, teks) => void selesaiSimpan(teks, it.id)} />
+      <PicaMingguModal isOpen={!!itemMinggu} item={itemMinggu} onClose={() => setItemMinggu(null)}
+        onSaved={(it, teks) => void selesaiSimpan(teks, it.id)} />
+      {superAdmin && (
+        <KelolaKategoriPica isOpen={kelolaKategori} onClose={() => setKelolaKategori(false)}
+          onBerubah={() => { setFilterKategori(null); void muatKategori(); void muat(); }} />
+      )}
+      <PicaImportModal isOpen={importTerbuka} site={site} labelSite={labelSite} onClose={() => setImportTerbuka(false)}
+        onDone={(teks) => void selesaiSimpan(teks)} />
+
       {!memuat && !kosong && (
         <>
+          {/* Mode Semua Site: kondisi tiap site dalam satu pandangan — klik kartu untuk menyaring tabel ke site itu */}
+          {modeSemua && (
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '.6rem', flexWrap: 'wrap', marginBottom: '.5rem' }}>
+                <span style={{ fontSize: '.72rem', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--wr-txt-muted)' }}>
+                  Kondisi per site · {perSite.length} site punya isu
+                </span>
+                {filterSite && (
+                  <button type="button" className="wr-btn" onClick={() => setFilterSite(null)} style={{ ...tombol, padding: '.2rem .6rem', fontSize: '.72rem' }}>
+                    Tampilkan semua site
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '.6rem' }}>
+                {perSite.map((e) => {
+                  const aktif = filterSite === e.key;
+                  const n = e.overdue ? NADA.neg : e.jalan ? NADA.warn : NADA.in;
+                  return (
+                    <button key={e.key} type="button" className="wr-kpi" aria-pressed={aktif} onClick={() => setFilterSite(aktif ? null : e.key)}
+                      style={{ textAlign: 'left', cursor: 'pointer', borderRadius: 14, padding: '.7rem .9rem',
+                        ...(aktif ? { background: n.bg, border: `1px solid ${n.garis}`, boxShadow: `inset 0 -3px 0 ${n.warna}` } : {}) }}>
+                      <div style={{ fontSize: '.82rem', fontWeight: 700, color: 'var(--txt-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.label}</div>
+                      <div style={{ display: 'flex', gap: '.7rem', marginTop: '.35rem', fontSize: '.72rem', color: 'var(--wr-txt-muted)' }}>
+                        <span style={{ color: e.overdue ? NADA.neg.teks : undefined, fontWeight: e.overdue ? 700 : 400 }}>{e.overdue} overdue</span>
+                        <span>{e.jalan} berjalan</span>
+                        <span>{e.selesai} close</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {siteTanpaIsu.length > 0 && (
+                <div style={{ marginTop: '.5rem', fontSize: '.74rem', color: 'var(--wr-txt-muted)' }}>
+                  Belum ada isu PICA tercatat: {siteTanpaIsu.join(', ')}.
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Ringkasan status — klik untuk filter cepat */}
           <div style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             <KartuRingkas label="Semua Isu" nilai={ringkasan.total} nada={NADA.info} aktif={filterGolongan === 'SEMUA'} onClick={() => setFilterGolongan('SEMUA')} />
@@ -294,15 +518,45 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
             <KartuRingkas label="Selesai / Close" nilai={ringkasan.selesai} nada={NADA.in} aktif={filterGolongan === 'selesai'} onClick={() => setFilterGolongan('selesai')} />
           </div>
 
+          {(namaKategori.length > 0 || chipKategori.daftar.some((c) => c.jumlah > 0)) && (
+            <div role="group" aria-label="Saring menurut kategori" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '.4rem', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '.72rem', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--wr-txt-muted)', marginRight: '.25rem' }}>Kategori</span>
+              {[
+                { kunci: null as string | null, nama: 'Semua', jumlah: chipKategori.semua },
+                ...chipKategori.daftar.filter((c) => c.jumlah > 0 || (filterKategori ?? '').toLowerCase() === c.nama.toLowerCase()).map((c) => ({ kunci: c.nama as string | null, nama: c.nama, jumlah: c.jumlah })),
+                ...(chipKategori.tanpa > 0 || filterKategori === '' ? [{ kunci: '' as string | null, nama: 'Tanpa kategori', jumlah: chipKategori.tanpa }] : []),
+              ].map((c) => {
+                const aktif = c.kunci === null ? filterKategori === null : filterKategori !== null && filterKategori.toLowerCase() === c.kunci.toLowerCase();
+                return (
+                  <button key={c.nama} type="button" className="wr-btn" aria-pressed={aktif} onClick={() => setFilterKategori(c.kunci)}
+                    style={{ ...tombol, padding: '.3rem .7rem', fontSize: '.76rem', borderRadius: 999, gap: '.35rem',
+                      ...(aktif ? { background: NADA.info.bg, borderColor: NADA.info.garis, color: NADA.info.teks, fontWeight: 700 } : {}) }}>
+                    {c.nama}
+                    <span style={{ fontSize: '.68rem', opacity: .75 }}>{c.jumlah}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="glass-panel" style={{ borderRadius: 16, overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>
               <table className="wr-tbl wr-tbl--plain" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.8rem' }}>
                 <thead>
                   <tr style={{ textAlign: 'left' }}>
                     <th style={{ padding: '.6rem .5rem', width: 28 }} />
+                    {modeSemua && <th style={{ padding: '.6rem .5rem' }}>Site</th>}
                     <th style={{ padding: '.6rem .5rem' }}>No</th>
                     <th style={{ padding: '.6rem .5rem' }}>Tanggal</th>
                     <th style={{ padding: '.6rem .5rem', minWidth: 200 }}>Problem</th>
+                    <th style={{ padding: '.6rem .5rem' }} aria-sort={urutKategori === 'asc' ? 'ascending' : urutKategori === 'desc' ? 'descending' : 'none'}>
+                      <button type="button" onClick={() => setUrutKategori((v) => (v === null ? 'asc' : v === 'asc' ? 'desc' : null))}
+                        title="Urutkan menurut kategori (klik lagi untuk membalik, sekali lagi untuk batal)"
+                        style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '.3rem', font: 'inherit', color: urutKategori ? NADA.info.teks : 'inherit' }}>
+                        Kategori
+                        {urutKategori === 'asc' ? <ArrowUp size={12} /> : urutKategori === 'desc' ? <ArrowDown size={12} /> : <ArrowUpDown size={12} style={{ opacity: .55 }} />}
+                      </button>
+                    </th>
                     <th style={{ padding: '.6rem .5rem' }}>PIC</th>
                     <th style={{ padding: '.6rem .5rem' }}>Target Date</th>
                     <th style={{ padding: '.6rem .5rem' }}>Status</th>
@@ -313,7 +567,8 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
                   {ditampilkan.map((it) => {
                     const buka = expanded.has(it.id);
                     const rentang = buka ? ringkasMingguan(it.updates) : [];
-                    const punyaDetail = it.identifikasi || it.deskripsi || it.updates.length > 0;
+                    const manual = it.origin === 'manual';
+                    const punyaDetail = manual || it.identifikasi || it.deskripsi || it.updates.length > 0;
                     const gol = golonganStatus(it.status);
                     const n = NADA_GOLONGAN[gol];
                     const IkonSt = IKON_GOLONGAN[gol];
@@ -330,11 +585,17 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
                               </button>
                             )}
                           </td>
-                          <td style={{ padding: '.6rem .5rem', color: 'var(--wr-txt-muted)' }}>{it.no}</td>
+                          {modeSemua && <td style={{ padding: '.6rem .5rem', whiteSpace: 'nowrap', fontWeight: 600 }}>{namaSite(it.site)}</td>}
+                          <td style={{ padding: '.6rem .5rem', color: 'var(--wr-txt-muted)', whiteSpace: 'nowrap' }}>
+                            {it.no}
+                            {manual && <span title="Diinput lewat aplikasi — bisa diubah di sini" style={{ marginLeft: '.35rem', fontSize: '.6rem', fontWeight: 700, padding: '.05rem .35rem', borderRadius: 6,
+                              background: NADA.info.bg, color: NADA.info.teks, border: `1px solid ${NADA.info.garis}`, verticalAlign: 'middle' }}>MANUAL</span>}
+                          </td>
                           <td style={{ padding: '.6rem .5rem', whiteSpace: 'nowrap' }}>{fmtTgl(it.tanggal)}</td>
                           <td style={{ padding: '.6rem .5rem', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.problem}>
                             {it.problem || '-'}
                           </td>
+                          <td style={{ padding: '.6rem .5rem', whiteSpace: 'nowrap', color: it.kategori ? 'inherit' : 'var(--wr-txt-muted)' }}>{it.kategori || '-'}</td>
                           <td style={{ padding: '.6rem .5rem', whiteSpace: 'nowrap' }}>{it.pic || '-'}</td>
                           <td style={{ padding: '.6rem .5rem', whiteSpace: 'nowrap' }}>{fmtTgl(it.targetDate)}</td>
                           <td style={{ padding: '.6rem .5rem' }}>
@@ -355,7 +616,40 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
                         {buka && (
                           <tr style={{ background: 'var(--wr-zebra)' }}>
                             <td />
-                            <td colSpan={7} style={{ padding: '.9rem 1rem 1.1rem 1.6rem' }}>
+                            <td colSpan={modeSemua ? 9 : 8} style={{ padding: '.9rem 1rem 1.1rem 1.6rem' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center', marginBottom: '.9rem' }} onClick={(e) => e.stopPropagation()}>
+                                {modeSemua && (
+                                  <button type="button" className="wr-btn wr-btn--info" onClick={() => { setSemuaSite(false); onSiteChange(it.site); }}
+                                    style={{ ...tombol, padding: '.35rem .75rem', fontSize: '.78rem' }} title="Buka halaman PICA site ini">
+                                    <ArrowUpRight size={14} /> Buka {namaSite(it.site)}
+                                  </button>
+                                )}
+                                {manual ? (
+                                  konfirmasiHapus === it.id ? (
+                                    <>
+                                      <span style={{ fontSize: '.78rem', color: NADA.neg.teks, fontWeight: 600 }}>Hapus isu No {it.no} beserta seluruh catatan mingguannya?</span>
+                                      <button type="button" className="wr-btn" onClick={() => void hapusIsu(it)} style={{ ...tombol, padding: '.35rem .75rem', fontSize: '.78rem', color: NADA.neg.teks }}>Ya, hapus</button>
+                                      <button type="button" className="wr-btn" onClick={() => setKonfirmasiHapus(null)} style={{ ...tombol, padding: '.35rem .75rem', fontSize: '.78rem' }}>Batal</button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button type="button" className="wr-btn wr-btn--primary" onClick={() => setItemMinggu(it)} style={{ ...tombol, padding: '.35rem .75rem', fontSize: '.78rem' }}>
+                                        <CalendarPlus size={14} /> Update Minggu
+                                      </button>
+                                      <button type="button" className="wr-btn" onClick={() => setForm({ item: it })} style={{ ...tombol, padding: '.35rem .75rem', fontSize: '.78rem' }}>
+                                        <Pencil size={14} /> Ubah
+                                      </button>
+                                      <button type="button" className="wr-btn" onClick={() => setKonfirmasiHapus(it.id)} style={{ ...tombol, padding: '.35rem .75rem', fontSize: '.78rem' }}>
+                                        <Trash2 size={14} /> Hapus
+                                      </button>
+                                    </>
+                                  )
+                                ) : (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem', fontSize: '.74rem', color: 'var(--wr-txt-muted)' }}>
+                                    <Lock size={13} /> Isu ini ditarik dari Google Sheet — ubah di sheet-nya.
+                                  </span>
+                                )}
+                              </div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '1.5rem' }}>
                                 <div style={{ display: 'grid', gap: '.7rem', alignContent: 'start' }}>
                                   {it.identifikasi && (
@@ -406,7 +700,7 @@ export function PicaView({ site, labelSite, sites, onSiteChange, siteTerkunci }:
                     );
                   })}
                   {!ditampilkan.length && (
-                    <tr><td colSpan={8} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)', fontSize: '.8rem' }}>
+                    <tr><td colSpan={modeSemua ? 10 : 9} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--wr-txt-muted)', fontSize: '.8rem' }}>
                       Tidak ada isu yang cocok dengan filter/pencarian.
                     </td></tr>
                   )}
